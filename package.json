@@ -1,7 +1,7 @@
 {
-  "name": "rocket-engine-v2-discovery",
-  "version": "2.0.0",
-  "description": "Auto-discovery rocket engine for supernova-style stocks",
+  "name": "rocket-engine-v31",
+  "version": "3.1.0",
+  "description": "Rocket Engine v3.1 - family supernova discovery with former runner and halt proxy scoring",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
