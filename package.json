@@ -1,0 +1,12 @@
+{
+  "name": "rocket-engine-supernova",
+  "version": "1.0.0",
+  "description": "Supernova rocket engine for low-price explosive stock pattern detection",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}
