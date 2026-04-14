@@ -7,6 +7,8 @@ const PORT = process.env.PORT || 10000;
 const ALPACA_API_KEY = process.env.ALPACA_API_KEY || "";
 const ALPACA_SECRET_KEY = process.env.ALPACA_SECRET_KEY || "";
 const ALPACA_FEED = (process.env.ALPACA_FEED || "iex").toLowerCase();
+const ALPACA_TRADING_BASE_URL =
+  process.env.ALPACA_TRADING_BASE_URL || "https://paper-api.alpaca.markets";
 
 app.use(express.json());
 app.use(express.static(__dirname));
@@ -17,11 +19,12 @@ const DEFAULT_SYMBOLS = [
   "IPST","TPST","RAYA","CUE"
 ];
 
-/**
- * Manual flags / metadata overrides.
- * Bunlar zorunlu değil ama modeli daha akıllı yapar.
- * Yeni sembol ekledikçe doldurabilirsin.
- */
+const ALLOWED_EXCHANGES = new Set(["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]);
+const BAD_NAME_TOKENS = [
+  "WARRANT", "RIGHT", "UNIT", "ETF", "FUND", "TRUST",
+  "ETN", "PREFERRED", "PFD", "DEPOSITARY", "ADR"
+];
+
 const SYMBOL_FLAGS = {
   RMSG: {
     recentReverseSplit: false,
@@ -57,10 +60,6 @@ const SYMBOL_FLAGS = {
   }
 };
 
-/**
- * Prototip pattern kütüphanesi.
- * Bunlar tam tarihsel öğrenilmiş etiketler değil; v1 için hedef davranış vektörleri.
- */
 const ROCKET_PROTOTYPES = [
   {
     name: "RMSG_STYLE_SUPERNOVA",
@@ -72,7 +71,6 @@ const ROCKET_PROTOTYPES = [
       prevVolRatio: 10,
       prevCloseStrength: 10,
       breakout20: 6,
- breakout20: 6,
       gapPct: 8,
       preVolRatio: 10,
       holdQuality: 10,
@@ -158,6 +156,17 @@ const ROCKET_PROTOTYPES = [
   }
 ];
 
+const ASSET_CACHE = {
+  expiresAt: 0,
+  data: null
+};
+
+const DISCOVERY_CACHE = {
+  expiresAt: 0,
+  key: "",
+  data: null
+};
+
 function safeNum(v, fallback = 0) {
   if (v === null || v === undefined || v === "") return fallback;
   const n = Number(v);
@@ -194,12 +203,20 @@ function minOf(arr) {
   return arr && arr.length ? Math.min(...arr) : null;
 }
 
+function chunkArray(arr, size) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) {
+    out.push(arr.slice(i, i + size));
+  }
+  return out;
+}
+
 function parseSymbols(raw) {
   const src = String(raw || "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean);
-  return [...new Set(src.length ? src : DEFAULT_SYMBOLS)];
+  return [...new Set(src)];
 }
 
 function getFlags(symbol) {
@@ -258,6 +275,15 @@ function zonedDateTimeToUtcISO(dateStr, timeStr, timeZone = "America/New_York") 
   return guess.toISOString();
 }
 
+function addDaysIso(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function isoDateNY(iso) {
   const d = new Date(iso);
   const p = timeZoneParts(d, "America/New_York");
@@ -306,7 +332,7 @@ function decisionRank(decision) {
   return 1;
 }
 
-async function alpacaGetJson(url) {
+async function alpacaGetJson(url, isTrading = false) {
   if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
     throw new Error("ALPACA_API_KEY / ALPACA_SECRET_KEY eksik");
   }
@@ -323,10 +349,65 @@ async function alpacaGetJson(url) {
   if (!response.ok) {
     throw new Error(`Alpaca ${response.status}: ${text}`);
   }
+
+  if (!text) return isTrading ? [] : {};
   return JSON.parse(text);
 }
 
-async function fetchAllBars(symbols, timeframe, startISO, endISO, feed = ALPACA_FEED, limit = 10000) {
+async function fetchAssets() {
+  if (ASSET_CACHE.data && Date.now() < ASSET_CACHE.expiresAt) {
+    return ASSET_CACHE.data;
+  }
+
+  const url = new URL("/v2/assets", ALPACA_TRADING_BASE_URL);
+  url.searchParams.set("status", "active");
+  url.searchParams.set("asset_class", "us_equity");
+
+  const assets = await alpacaGetJson(url.toString(), true);
+
+  const filtered = (assets || []).filter((a) => {
+    const symbol = String(a.symbol || "").toUpperCase();
+    const name = String(a.name || "").toUpperCase();
+
+    if (!a.tradable) return false;
+    if (!ALLOWED_EXCHANGES.has(String(a.exchange || "").toUpperCase())) return false;
+    if (!/^[A-Z]{1,5}$/.test(symbol)) return false;
+    if (BAD_NAME_TOKENS.some((x) => name.includes(x))) return false;
+    return true;
+  });
+
+  ASSET_CACHE.data = filtered;
+  ASSET_CACHE.expiresAt = Date.now() + 12 * 60 * 60 * 1000;
+  return filtered;
+}
+
+async function fetchSnapshotsBatch(symbols, feed = ALPACA_FEED) {
+  if (!symbols.length) return {};
+  const url = new URL("https://data.alpaca.markets/v2/stocks/snapshots");
+  url.searchParams.set("symbols", symbols.join(","));
+  url.searchParams.set("feed", feed);
+  return alpacaGetJson(url.toString());
+}
+
+async function fetchSnapshotsBatched(symbols, feed = ALPACA_FEED, batchSize = 80, concurrency = 6) {
+  const result = {};
+  const chunks = chunkArray(symbols, batchSize);
+
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const group = chunks.slice(i, i + concurrency);
+    const responses = await Promise.all(group.map((c) => fetchSnapshotsBatch(c, feed)));
+
+    for (const resp of responses) {
+      for (const [symbol, snap] of Object.entries(resp || {})) {
+        result[symbol] = snap;
+      }
+    }
+  }
+
+  return result;
+}
+
+async function fetchBarsBatch(symbols, timeframe, startISO, endISO, feed = ALPACA_FEED, limit = 10000) {
   const barsBySymbol = {};
   let pageToken = null;
 
@@ -360,6 +441,43 @@ async function fetchAllBars(symbols, timeframe, startISO, endISO, feed = ALPACA_
   }
 
   return barsBySymbol;
+}
+
+async function fetchBarsBatched(symbols, timeframe, startISO, endISO, feed = ALPACA_FEED, batchSize = 50, concurrency = 4) {
+  const out = {};
+  const chunks = chunkArray(symbols, batchSize);
+
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const group = chunks.slice(i, i + concurrency);
+    const responses = await Promise.all(
+      group.map((c) => fetchBarsBatch(c, timeframe, startISO, endISO, feed))
+    );
+
+    for (const resp of responses) {
+      for (const [symbol, arr] of Object.entries(resp || {})) {
+        if (!out[symbol]) out[symbol] = [];
+        out[symbol].push(...arr);
+      }
+    }
+  }
+
+  for (const symbol of symbols) {
+    if (!out[symbol]) out[symbol] = [];
+    out[symbol].sort((a, b) => new Date(a.t) - new Date(b.t));
+  }
+
+  return out;
+}
+
+function getBarsForDate(allBars, dateStr) {
+  return (allBars || []).filter((b) => isoDateNY(b.t) === dateStr);
+}
+
+function filterBarsByTime(bars, startTime, endTime) {
+  return (bars || []).filter((b) => {
+    const t = isoTimeNY(b.t);
+    return t >= startTime && t <= endTime;
+  });
 }
 
 function computeVWAP(bars) {
@@ -397,20 +515,10 @@ function computeRangePct(high, low, ref) {
   return ((high - low) / ref) * 100;
 }
 
-function getBarsForDate(allBars, dateStr) {
-  return (allBars || []).filter((b) => isoDateNY(b.t) === dateStr);
-}
-
-function filterBarsByTime(bars, startTime, endTime) {
-  return (bars || []).filter((b) => {
-    const t = isoTimeNY(b.t);
-    return t >= startTime && t <= endTime;
-  });
-}
-
 function buildDailyHistoryContext(dailyBars, tradeDate) {
   const sorted = [...(dailyBars || [])].sort((a, b) => new Date(a.t) - new Date(b.t));
   const priorBars = sorted.filter((b) => isoDateNY(b.t) < tradeDate);
+
   if (priorBars.length < 25) return null;
 
   const last = priorBars[priorBars.length - 1];
@@ -461,9 +569,10 @@ function buildIgnitionMetrics(ctx, flags) {
   const prevVolRatio = prevVol / avgVol20;
   const prevDollarVol = prevVol * price;
 
-  const avgRange20 = Math.max(avg(
-    ctx.hist20.slice(0, -1).map((b) => computeRangePct(b.h, b.l, b.c) || 0)
-  ), 0.0001);
+  const avgRange20 = Math.max(
+    avg(ctx.hist20.slice(0, -1).map((b) => computeRangePct(b.h, b.l, b.c) || 0)),
+    0.0001
+  );
 
   const prevRangePct = computeRangePct(ctx.last.h, ctx.last.l, ctx.last.c);
   const rangeExpansion = prevRangePct != null ? prevRangePct / avgRange20 : 0;
@@ -539,6 +648,7 @@ function buildPremarketMetrics(minuteBars, tradeDate, cutoffTime, prevClose, pre
     preVWAP,
     holdQuality,
     preRangePct,
+    preVolRatio: 0,
     preDollarVol,
     abovePreVWAP,
     abovePrevHigh
@@ -611,9 +721,7 @@ function scoreIgnition(m) {
   if (m.prevDayRet >= 4 && m.prevDayRet < 15) score += 16;
   else if (m.prevDayRet >= 15 && m.prevDayRet < 45) score += 22;
   else if (m.prevDayRet >= 45 && m.prevDayRet < 100) score += 14;
-  else if (m.prevDayRet < 0) {
-    score -= 12;
-  }
+  else if (m.prevDayRet < 0) score -= 12;
 
   if (m.prevVolRatio >= 1.5 && m.prevVolRatio < 3) score += 12;
   else if (m.prevVolRatio >= 3 && m.prevVolRatio < 8) score += 20;
@@ -746,8 +854,7 @@ function bandSimilarity(value, idealLow, idealHigh, hardLow, hardHigh) {
 }
 
 function boolSimilarity(value, idealLow, idealHigh, hardLow, hardHigh) {
-  const v = value ? 1 : 0;
-  return bandSimilarity(v, idealLow, idealHigh, hardLow, hardHigh);
+  return bandSimilarity(value ? 1 : 0, idealLow, idealHigh, hardLow, hardHigh);
 }
 
 function computePatternSimilarity(featureSet) {
@@ -760,6 +867,12 @@ function computePatternSimilarity(featureSet) {
       if (!band) continue;
 
       const val = featureSet[key];
+      const hasValue =
+        typeof val === "boolean" ||
+        (val !== null && val !== undefined && Number.isFinite(Number(val)));
+
+      if (!hasValue) continue;
+
       const sim = typeof val === "boolean"
         ? boolSimilarity(val, band[0], band[1], band[2], band[3])
         : bandSimilarity(val, band[0], band[1], band[2], band[3]);
@@ -769,6 +882,7 @@ function computePatternSimilarity(featureSet) {
     }
 
     const score = totalWeight > 0 ? (weighted / totalWeight) * 100 : 0;
+
     return {
       name: proto.name,
       score: Math.round(score)
@@ -795,6 +909,7 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
 
   const reclaim = prevHigh > 0 ? prevHigh * 1.01 : null;
   const vwapEntry = preVWAP != null ? preVWAP * 1.01 : null;
+
   let entryIdea = null;
   let entryType = "WATCH";
 
@@ -802,12 +917,9 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
     entryIdea = reclaim;
     entryType = "WATCH_RECLAIM";
   } else {
-    entryIdea = Math.max(
-      safeNum(reclaim, 0),
-      safeNum(vwapEntry, 0)
-    );
+    entryIdea = Math.max(safeNum(reclaim, 0), safeNum(vwapEntry, 0));
 
-    if (price != null && entryIdea != null) {
+    if (price != null && entryIdea != null && entryIdea > 0) {
       const distance = ((price - entryIdea) / entryIdea) * 100;
       if (distance <= 4) entryType = "BUY_NEAR_ENTRY";
       else if (distance <= 12) entryType = "WAIT_RETEST";
@@ -825,25 +937,34 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
     };
   }
 
-  const stop = entryIdea * 0.88;
-  const tp1 = entryIdea * 1.15;
-  const tp2 = entryIdea * 1.30;
-
   return {
     entryType,
     entryIdea: roundSmart(entryIdea),
-    stop: roundSmart(stop),
-    tp1: roundSmart(tp1),
-    tp2: roundSmart(tp2)
+    stop: roundSmart(entryIdea * 0.88),
+    tp1: roundSmart(entryIdea * 1.15),
+    tp2: roundSmart(entryIdea * 1.30)
   };
 }
 
-function finalDecision({ structuralScore, ignitionScore, premarketScore, similarityScore, source }) {
-  const nightComposite = 0.4 * structuralScore + 0.6 * ignitionScore;
-  const liveComposite = 0.25 * structuralScore + 0.25 * ignitionScore + 0.25 * premarketScore + 0.25 * similarityScore;
+function finalNightlyDecision({ structuralScore, ignitionScore, patternScore }) {
+  const composite = 0.35 * structuralScore + 0.35 * ignitionScore + 0.30 * patternScore;
+  if (composite >= 70 && structuralScore >= 40 && ignitionScore >= 50 && patternScore >= 58) {
+    return "İZLE";
+  }
+  return "ALMA";
+}
+
+function finalLiveDecision({ structuralScore, ignitionScore, premarketScore, patternScore, source }) {
+  const composite =
+    0.25 * structuralScore +
+    0.25 * ignitionScore +
+    0.25 * premarketScore +
+    0.25 * patternScore;
 
   if (source !== "REAL_PREMARKET") {
-    if (nightComposite >= 68 && similarityScore >= 60) return "İZLE";
+    if (0.4 * structuralScore + 0.3 * ignitionScore + 0.3 * patternScore >= 70 && patternScore >= 58) {
+      return "İZLE";
+    }
     return "ALMA";
   }
 
@@ -851,8 +972,8 @@ function finalDecision({ structuralScore, ignitionScore, premarketScore, similar
     structuralScore >= 50 &&
     ignitionScore >= 60 &&
     premarketScore >= 72 &&
-    similarityScore >= 72 &&
-    liveComposite >= 72
+    patternScore >= 72 &&
+    composite >= 72
   ) {
     return "GÜÇLÜ AL";
   }
@@ -861,23 +982,158 @@ function finalDecision({ structuralScore, ignitionScore, premarketScore, similar
     structuralScore >= 40 &&
     ignitionScore >= 50 &&
     premarketScore >= 58 &&
-    similarityScore >= 60 &&
-    liveComposite >= 60
+    patternScore >= 60 &&
+    composite >= 60
   ) {
     return "AL";
   }
 
-  if (nightComposite >= 68 && similarityScore >= 55) return "İZLE";
+  if (0.4 * structuralScore + 0.3 * ignitionScore + 0.3 * patternScore >= 70 && patternScore >= 58) {
+    return "İZLE";
+  }
+
   return "ALMA";
 }
 
-function buildRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTime }) {
+function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
+  const flags = getFlags(symbol);
+  const ctx = buildDailyHistoryContext(dailyBars, referenceTradeDate);
+  if (!ctx) return null;
+
+  const structuralMetrics = buildStructuralMetrics(ctx, flags);
+  const ignitionMetrics = buildIgnitionMetrics(ctx, flags);
+
+  const structural = scoreStructural(structuralMetrics, flags);
+  if (structural.hardReject) {
+    return {
+      symbol,
+      decision: "ALMA",
+      structuralScore: structural.score,
+      ignitionScore: 0,
+      premarketScore: 0,
+      patternScore: 0,
+      bestPattern: null,
+      topMatches: "",
+      source: "NONE",
+      price: null,
+      prevClose: roundSmart(ctx.last.c),
+      prevHigh: roundSmart(ctx.last.h),
+      gapPct: null,
+      preVol: 0,
+      preVolBaselineMedian: 0,
+      preVolRatio: 0,
+      preDollarVol: 0,
+      preVWAP: null,
+      abovePreVWAP: false,
+      holdQuality: null,
+      preRangePct: null,
+      abovePrevHigh: false,
+      drawdown90: roundSmart(structuralMetrics.drawdown90),
+      reboundFrom30Low: roundSmart(structuralMetrics.reboundFrom30Low),
+      baseTightness10: roundSmart(structuralMetrics.baseTightness10),
+      breakout20: structuralMetrics.breakout20 ? "YES" : "NO",
+      prevDayRet: roundSmart(ignitionMetrics.prevDayRet),
+      prevCloseStrength: roundSmart(ignitionMetrics.prevCloseStrength),
+      prevVolRatio: roundSmart(ignitionMetrics.prevVolRatio),
+      prevDollarVol: Math.round(ignitionMetrics.prevDollarVol || 0),
+      rangeExpansion: roundSmart(ignitionMetrics.rangeExpansion),
+      entryType: "NO_TRADE",
+      entryIdea: null,
+      stop: null,
+      tp1: null,
+      tp2: null,
+      notes: structural.notes.join(" | ")
+    };
+  }
+
+  const ignition = scoreIgnition(ignitionMetrics);
+
+  const featureSet = {
+    price: structuralMetrics.price,
+    drawdown90: structuralMetrics.drawdown90,
+    baseTightness10: structuralMetrics.baseTightness10,
+    prevDayRet: ignitionMetrics.prevDayRet,
+    prevVolRatio: ignitionMetrics.prevVolRatio,
+    prevCloseStrength: ignitionMetrics.prevCloseStrength,
+    breakout20: !!structuralMetrics.breakout20
+  };
+
+  const pattern = computePatternSimilarity(featureSet);
+
+  const decision = finalNightlyDecision({
+    structuralScore: structural.score,
+    ignitionScore: ignition.score,
+    patternScore: pattern.bestScore
+  });
+
+  const plan = buildEntryPlan(
+    decision,
+    "NONE",
+    null,
+    null,
+    safeNum(ctx.last.h, 0)
+  );
+
+  return {
+    symbol,
+    decision,
+
+    structuralScore: structural.score,
+    ignitionScore: ignition.score,
+    premarketScore: 0,
+    patternScore: pattern.bestScore,
+    bestPattern: pattern.bestName,
+    topMatches: pattern.topMatches.map((x) => `${x.name}:${x.score}`).join(" | "),
+
+    source: "NONE",
+
+    price: null,
+    prevClose: roundSmart(ctx.last.c),
+    prevHigh: roundSmart(ctx.last.h),
+    gapPct: null,
+
+    preVol: 0,
+    preVolBaselineMedian: 0,
+    preVolRatio: 0,
+    preDollarVol: 0,
+
+    preVWAP: null,
+    abovePreVWAP: false,
+    holdQuality: null,
+    preRangePct: null,
+    abovePrevHigh: false,
+
+    drawdown90: roundSmart(structuralMetrics.drawdown90),
+    reboundFrom30Low: roundSmart(structuralMetrics.reboundFrom30Low),
+    baseTightness10: roundSmart(structuralMetrics.baseTightness10),
+    breakout20: structuralMetrics.breakout20 ? "YES" : "NO",
+
+    prevDayRet: roundSmart(ignitionMetrics.prevDayRet),
+    prevCloseStrength: roundSmart(ignitionMetrics.prevCloseStrength),
+    prevVolRatio: roundSmart(ignitionMetrics.prevVolRatio),
+    prevDollarVol: Math.round(ignitionMetrics.prevDollarVol || 0),
+    rangeExpansion: roundSmart(ignitionMetrics.rangeExpansion),
+
+    entryType: plan.entryType,
+    entryIdea: plan.entryIdea,
+    stop: plan.stop,
+    tp1: plan.tp1,
+    tp2: plan.tp2,
+
+    notes: [...structural.notes, ...ignition.notes].join(" | ")
+  };
+}
+
+function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTime }) {
   const flags = getFlags(symbol);
   const ctx = buildDailyHistoryContext(dailyBars, tradeDate);
   if (!ctx) return null;
 
   const structuralMetrics = buildStructuralMetrics(ctx, flags);
   const ignitionMetrics = buildIgnitionMetrics(ctx, flags);
+
+  const structural = scoreStructural(structuralMetrics, flags);
+  const ignition = scoreIgnition(ignitionMetrics);
 
   const baseline = computeSameTimePremarketBaseline(minuteBars, ctx.priorDates, cutoffTime);
   const pre = buildPremarketMetrics(
@@ -898,8 +1154,6 @@ function buildRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTime }
     preVolRatio
   };
 
-  const structural = scoreStructural(structuralMetrics, flags);
-  const ignition = scoreIgnition(ignitionMetrics);
   const premarket = scorePremarket(preMetrics, ALPACA_FEED);
 
   const featureSet = {
@@ -909,23 +1163,23 @@ function buildRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTime }
     prevDayRet: ignitionMetrics.prevDayRet,
     prevVolRatio: ignitionMetrics.prevVolRatio,
     prevCloseStrength: ignitionMetrics.prevCloseStrength,
-    breakout20: structuralMetrics.breakout20,
+    breakout20: !!structuralMetrics.breakout20,
     gapPct: preMetrics.gapPct,
     preVolRatio: preMetrics.preVolRatio,
     holdQuality: preMetrics.holdQuality,
     preDollarVol: preMetrics.preDollarVol,
-    abovePrevHigh: preMetrics.abovePrevHigh
+    abovePrevHigh: !!preMetrics.abovePrevHigh
   };
 
   const pattern = computePatternSimilarity(featureSet);
 
   let decision = "ALMA";
   if (!structural.hardReject && !premarket.hardReject) {
-    decision = finalDecision({
+    decision = finalLiveDecision({
       structuralScore: structural.score,
       ignitionScore: ignition.score,
       premarketScore: premarket.score,
-      similarityScore: pattern.bestScore,
+      patternScore: pattern.bestScore,
       source: pre.source
     });
   }
@@ -967,7 +1221,6 @@ function buildRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTime }
     preRangePct: roundSmart(pre.preRangePct),
     abovePrevHigh: !!pre.abovePrevHigh,
 
-    structuralPrice: roundSmart(structuralMetrics.price),
     drawdown90: roundSmart(structuralMetrics.drawdown90),
     reboundFrom30Low: roundSmart(structuralMetrics.reboundFrom30Low),
     baseTightness10: roundSmart(structuralMetrics.baseTightness10),
@@ -1052,7 +1305,485 @@ function summarizeRows(rows) {
   };
 }
 
-async function buildBacktest(dateStr, symbols) {
+function scoreQuickDiscovery(asset, snap) {
+  const latestTrade = snap?.latestTrade || {};
+  const dailyBar = snap?.dailyBar || {};
+  const prevDailyBar = snap?.prevDailyBar || {};
+
+  const price = safeNum(latestTrade.p, safeNum(dailyBar.c, safeNum(prevDailyBar.c, null)));
+  const prevClose = safeNum(prevDailyBar.c, null);
+  const dayVol = Math.max(safeNum(dailyBar.v, 0), safeNum(prevDailyBar.v, 0));
+  const dollarVol = price != null ? price * dayVol : 0;
+  const dayRet = prevClose && price ? ((price - prevClose) / prevClose) * 100 : 0;
+
+  if (price == null || price < 0.10 || price > 5.00) return null;
+  if (dayVol < 25000) return null;
+  if (dollarVol < 50000) return null;
+
+  let score = 0;
+
+  if (price >= 0.10 && price <= 1) score += 18;
+  else if (price <= 3) score += 14;
+  else score += 8;
+
+  if (dayRet >= 3 && dayRet < 15) score += 10;
+  else if (dayRet >= 15 && dayRet < 60) score += 18;
+  else if (dayRet >= 60) score += 12;
+  else if (dayRet < -20) score -= 8;
+
+  if (dayVol >= 100000 && dayVol < 500000) score += 10;
+  else if (dayVol >= 500000 && dayVol < 5000000) score += 16;
+  else if (dayVol >= 5000000) score += 22;
+
+  if (dollarVol >= 100000 && dollarVol < 400000) score += 8;
+  else if (dollarVol >= 400000 && dollarVol < 2000000) score += 14;
+  else if (dollarVol >= 2000000) score += 20;
+
+  if (String(asset.exchange || "").toUpperCase() === "NASDAQ") score += 2;
+  if (String(asset.exchange || "").toUpperCase() === "AMEX") score += 2;
+
+  return {
+    symbol: asset.symbol,
+    price: roundSmart(price),
+    dayRet: roundSmart(dayRet),
+    dayVol: Math.round(dayVol),
+    dollarVol: Math.round(dollarVol),
+    quickScore: score
+  };
+}
+
+async function discoverUniverseCandidates(session) {
+  const cacheKey = `${session}:${ALPACA_FEED}`;
+  if (
+    DISCOVERY_CACHE.data &&
+    DISCOVERY_CACHE.key === cacheKey &&
+    Date.now() < DISCOVERY_CACHE.expiresAt
+  ) {
+    return DISCOVERY_CACHE.data;
+  }
+
+  const assets = await fetchAssets();
+  const symbols = assets.map((a) => a.symbol);
+  const snapshots = await fetchSnapshotsBatched(symbols, ALPACA_FEED, 80, 6);
+
+  const quick = [];
+  for (const asset of assets) {
+    const row = scoreQuickDiscovery(asset, snapshots[asset.symbol]);
+    if (row) quick.push(row);
+  }
+
+  quick.sort((a, b) => b.quickScore - a.quickScore);
+
+  const data = {
+    totalUniverse: assets.length,
+    passedQuick: quick.length,
+    quickCandidates: quick.slice(0, 180),
+    quickTop20: quick.slice(0, 20)
+  };
+
+  DISCOVERY_CACHE.key = cacheKey;
+  DISCOVERY_CACHE.data = data;
+  DISCOVERY_CACHE.expiresAt = Date.now() + 5 * 60 * 1000;
+
+  return data;
+}
+
+async function buildLiveAutoUniverse(session, today, cutoffTime) {
+  const discovery = await discoverUniverseCandidates(session);
+  const quickSymbols = discovery.quickCandidates.map((x) => x.symbol);
+
+  if (!quickSymbols.length) {
+    return {
+      mode: "AUTO_DISCOVERY_EMPTY",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime,
+      universeMode: "AUTO_DISCOVERY",
+      discoveredUniverse: discovery.totalUniverse,
+      quickPassed: discovery.passedQuick,
+      rows: [],
+      summary: summarizeRows([]),
+      message: "Quick discovery aday bulamadı."
+    };
+  }
+
+  const dailyLookbackStart = new Date(Date.now() - 140 * 86400000);
+  const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
+  const dailyEnd = new Date().toISOString();
+
+  const referenceTradeDate =
+    session === "afterhours" || session === "closed"
+      ? addDaysIso(today, 1)
+      : today;
+
+  const dailyBarsMap = await fetchBarsBatched(
+    quickSymbols,
+    "1Day",
+    dailyStart,
+    dailyEnd,
+    ALPACA_FEED,
+    50,
+    4
+  );
+
+  const nightlyRows = [];
+  for (const symbol of quickSymbols) {
+    const row = buildNightlyRocketRow({
+      symbol,
+      dailyBars: dailyBarsMap[symbol] || [],
+      referenceTradeDate
+    });
+    if (row) nightlyRows.push(row);
+  }
+
+  nightlyRows.sort((a, b) => {
+    const aKey =
+      decisionRank(a.decision) * 100000 +
+      safeNum(a.patternScore, 0) * 100 +
+      safeNum(a.ignitionScore, 0);
+
+    const bKey =
+      decisionRank(b.decision) * 100000 +
+      safeNum(b.patternScore, 0) * 100 +
+      safeNum(b.ignitionScore, 0);
+
+    return bKey - aKey;
+  });
+
+  if (session === "afterhours" || session === "closed") {
+    return {
+      mode: "AUTO_ROCKET_NIGHTLY",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime: null,
+      universeMode: "AUTO_DISCOVERY",
+      discoveredUniverse: discovery.totalUniverse,
+      quickPassed: discovery.passedQuick,
+      quickTop20: discovery.quickTop20,
+      rows: nightlyRows.slice(0, 40),
+      summary: summarizeRows(nightlyRows.slice(0, 40)),
+      message: "Auto-discovery + nightly rocket shortlist üretildi."
+    };
+  }
+
+  const topNightlySymbols = nightlyRows.slice(0, 60).map((r) => r.symbol);
+
+  const minuteLookbackStart = new Date(Date.now() - 12 * 86400000);
+  const priorMinuteStart = zonedDateTimeToUtcISO(minuteLookbackStart.toISOString().slice(0, 10), "04:00");
+  const priorMinuteEnd = zonedDateTimeToUtcISO(today, "03:59");
+  const tradeMinuteStart = zonedDateTimeToUtcISO(today, "04:00");
+  const tradeMinuteEnd = new Date().toISOString();
+
+  const priorStartMs = new Date(priorMinuteStart).getTime();
+  const priorEndMs = new Date(priorMinuteEnd).getTime();
+  const tradeStartMs = new Date(tradeMinuteStart).getTime();
+  const tradeEndMs = new Date(tradeMinuteEnd).getTime();
+
+  if (!(tradeEndMs > tradeStartMs)) {
+    return {
+      mode: "WAITING_WINDOW",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime,
+      universeMode: "AUTO_DISCOVERY",
+      discoveredUniverse: discovery.totalUniverse,
+      quickPassed: discovery.passedQuick,
+      quickTop20: discovery.quickTop20,
+      rows: [],
+      summary: summarizeRows([]),
+      message: "Trade minute penceresi henüz oluşmadı."
+    };
+  }
+
+  let prior5MinMap = {};
+  for (const s of topNightlySymbols) prior5MinMap[s] = [];
+
+  const trade1MinMap = await fetchBarsBatched(
+    topNightlySymbols,
+    "1Min",
+    tradeMinuteStart,
+    tradeMinuteEnd,
+    ALPACA_FEED,
+    50,
+    4
+  );
+
+  if (priorEndMs > priorStartMs) {
+    prior5MinMap = await fetchBarsBatched(
+      topNightlySymbols,
+      "5Min",
+      priorMinuteStart,
+      priorMinuteEnd,
+      ALPACA_FEED,
+      50,
+      4
+    );
+  }
+
+  const fullRows = [];
+  for (const symbol of topNightlySymbols) {
+    const dailyBars = dailyBarsMap[symbol] || [];
+    const prior5 = prior5MinMap[symbol] || [];
+    const trade1 = trade1MinMap[symbol] || [];
+    const mergedMinuteBars = [...prior5, ...trade1].sort((a, b) => new Date(a.t) - new Date(b.t));
+
+    const row = buildFullRocketRow({
+      symbol,
+      dailyBars,
+      minuteBars: mergedMinuteBars,
+      tradeDate: today,
+      cutoffTime
+    });
+    if (row) fullRows.push(row);
+  }
+
+  fullRows.sort((a, b) => {
+    const aKey =
+      decisionRank(a.decision) * 100000 +
+      safeNum(a.patternScore, 0) * 100 +
+      safeNum(a.premarketScore, 0);
+
+    const bKey =
+      decisionRank(b.decision) * 100000 +
+      safeNum(b.patternScore, 0) * 100 +
+      safeNum(b.premarketScore, 0);
+
+    return bKey - aKey;
+  });
+
+  return {
+    mode: "AUTO_ROCKET_PREMARKET",
+    session,
+    feed: ALPACA_FEED,
+    cutoffTime,
+    universeMode: "AUTO_DISCOVERY",
+    discoveredUniverse: discovery.totalUniverse,
+    quickPassed: discovery.passedQuick,
+    quickTop20: discovery.quickTop20,
+    rows: fullRows,
+    summary: summarizeRows(fullRows),
+    message: null
+  };
+}
+
+async function buildLiveManual(symbols, session, today, cutoffTime) {
+  const dailyLookbackStart = new Date(Date.now() - 140 * 86400000);
+  const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
+  const dailyEnd = new Date().toISOString();
+
+  const referenceTradeDate =
+    session === "afterhours" || session === "closed"
+      ? addDaysIso(today, 1)
+      : today;
+
+  const dailyBarsMap = await fetchBarsBatched(
+    symbols,
+    "1Day",
+    dailyStart,
+    dailyEnd,
+    ALPACA_FEED,
+    50,
+    4
+  );
+
+  if (session === "afterhours" || session === "closed") {
+    const rows = [];
+    for (const symbol of symbols) {
+      const row = buildNightlyRocketRow({
+        symbol,
+        dailyBars: dailyBarsMap[symbol] || [],
+        referenceTradeDate
+      });
+      if (row) rows.push(row);
+    }
+
+    rows.sort((a, b) => {
+      const aKey =
+        decisionRank(a.decision) * 100000 +
+        safeNum(a.patternScore, 0) * 100 +
+        safeNum(a.ignitionScore, 0);
+
+      const bKey =
+        decisionRank(b.decision) * 100000 +
+        safeNum(b.patternScore, 0) * 100 +
+        safeNum(b.ignitionScore, 0);
+
+      return bKey - aKey;
+    });
+
+    return {
+      mode: "MANUAL_ROCKET_NIGHTLY",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime: null,
+      universeMode: "MANUAL_LIST",
+      discoveredUniverse: symbols.length,
+      quickPassed: symbols.length,
+      quickTop20: [],
+      rows,
+      summary: summarizeRows(rows),
+      message: "Manuel liste nightly rocket watchlist olarak işlendi."
+    };
+  }
+
+  const minuteLookbackStart = new Date(Date.now() - 12 * 86400000);
+  const priorMinuteStart = zonedDateTimeToUtcISO(minuteLookbackStart.toISOString().slice(0, 10), "04:00");
+  const priorMinuteEnd = zonedDateTimeToUtcISO(today, "03:59");
+  const tradeMinuteStart = zonedDateTimeToUtcISO(today, "04:00");
+  const tradeMinuteEnd = new Date().toISOString();
+
+  const priorStartMs = new Date(priorMinuteStart).getTime();
+  const priorEndMs = new Date(priorMinuteEnd).getTime();
+  const tradeStartMs = new Date(tradeMinuteStart).getTime();
+  const tradeEndMs = new Date(tradeMinuteEnd).getTime();
+
+  if (!(tradeEndMs > tradeStartMs)) {
+    return {
+      mode: "WAITING_WINDOW",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime,
+      universeMode: "MANUAL_LIST",
+      discoveredUniverse: symbols.length,
+      quickPassed: symbols.length,
+      quickTop20: [],
+      rows: [],
+      summary: summarizeRows([]),
+      message: "Trade minute penceresi henüz oluşmadı."
+    };
+  }
+
+  let prior5MinMap = {};
+  for (const s of symbols) prior5MinMap[s] = [];
+
+  const trade1MinMap = await fetchBarsBatched(
+    symbols,
+    "1Min",
+    tradeMinuteStart,
+    tradeMinuteEnd,
+    ALPACA_FEED,
+    50,
+    4
+  );
+
+  if (priorEndMs > priorStartMs) {
+    prior5MinMap = await fetchBarsBatched(
+      symbols,
+      "5Min",
+      priorMinuteStart,
+      priorMinuteEnd,
+      ALPACA_FEED,
+      50,
+      4
+    );
+  }
+
+  const rows = [];
+  for (const symbol of symbols) {
+    const dailyBars = dailyBarsMap[symbol] || [];
+    const prior5 = prior5MinMap[symbol] || [];
+    const trade1 = trade1MinMap[symbol] || [];
+    const mergedMinuteBars = [...prior5, ...trade1].sort((a, b) => new Date(a.t) - new Date(b.t));
+
+    const row = buildFullRocketRow({
+      symbol,
+      dailyBars,
+      minuteBars: mergedMinuteBars,
+      tradeDate: today,
+      cutoffTime
+    });
+    if (row) rows.push(row);
+  }
+
+  rows.sort((a, b) => {
+    const aKey =
+      decisionRank(a.decision) * 100000 +
+      safeNum(a.patternScore, 0) * 100 +
+      safeNum(a.premarketScore, 0);
+
+    const bKey =
+      decisionRank(b.decision) * 100000 +
+      safeNum(b.patternScore, 0) * 100 +
+      safeNum(b.premarketScore, 0);
+
+    return bKey - aKey;
+  });
+
+  return {
+    mode: "MANUAL_ROCKET_PREMARKET",
+    session,
+    feed: ALPACA_FEED,
+    cutoffTime,
+    universeMode: "MANUAL_LIST",
+    discoveredUniverse: symbols.length,
+    quickPassed: symbols.length,
+    quickTop20: [],
+    rows,
+    summary: summarizeRows(rows),
+    message: null
+  };
+}
+
+async function buildLive(manualSymbolsRaw) {
+  const session = getSessionLabelNow();
+  const today = getTodayNyDate();
+  const nowNy = getNowNyTime();
+  const manualSymbols = parseSymbols(manualSymbolsRaw);
+
+  if (session === "weekend") {
+    return {
+      mode: "NO_MARKET",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime: null,
+      universeMode: manualSymbols.length ? "MANUAL_LIST" : "AUTO_DISCOVERY",
+      discoveredUniverse: 0,
+      quickPassed: 0,
+      quickTop20: [],
+      rows: [],
+      summary: summarizeRows([]),
+      message: "Hafta sonu."
+    };
+  }
+
+  if (session !== "afterhours" && session !== "closed" && nowNy < "04:00:00") {
+    return {
+      mode: "WAIT_PREMARKET",
+      session,
+      feed: ALPACA_FEED,
+      cutoffTime: null,
+      universeMode: manualSymbols.length ? "MANUAL_LIST" : "AUTO_DISCOVERY",
+      discoveredUniverse: 0,
+      quickPassed: 0,
+      quickTop20: [],
+      rows: [],
+      summary: summarizeRows([]),
+      message: "Premarket henüz başlamadı. 04:00 ET sonrası tekrar dene."
+    };
+  }
+
+  let cutoffTime = "09:25:00";
+  if (session === "premarket") {
+    cutoffTime = nowNy > "09:25:00" ? "09:25:00" : nowNy;
+  } else if (session === "open") {
+    cutoffTime = "09:25:00";
+  } else {
+    cutoffTime = null;
+  }
+
+  if (manualSymbols.length) {
+    return buildLiveManual(manualSymbols, session, today, cutoffTime);
+  }
+
+  return buildLiveAutoUniverse(session, today, cutoffTime);
+}
+
+async function buildBacktest(dateStr, symbolsRaw) {
+  const symbols = parseSymbols(symbolsRaw);
+  if (!symbols.length) {
+    throw new Error("Backtest için manuel sembol listesi gerekli.");
+  }
+
   const dailyLookbackStart = new Date(new Date(dateStr).getTime() - 140 * 86400000);
   const minuteLookbackStart = new Date(new Date(dateStr).getTime() - 12 * 86400000);
 
@@ -1066,9 +1797,9 @@ async function buildBacktest(dateStr, symbols) {
   const tradeMinuteEnd = zonedDateTimeToUtcISO(dateStr, "12:00");
 
   const [dailyBarsMap, prior5MinMap, trade1MinMap] = await Promise.all([
-    fetchAllBars(symbols, "1Day", dailyStart, dailyEnd, ALPACA_FEED, 10000),
-    fetchAllBars(symbols, "5Min", priorMinuteStart, priorMinuteEnd, ALPACA_FEED, 10000),
-    fetchAllBars(symbols, "1Min", tradeMinuteStart, tradeMinuteEnd, ALPACA_FEED, 10000)
+    fetchBarsBatched(symbols, "1Day", dailyStart, dailyEnd, ALPACA_FEED, 50, 4),
+    fetchBarsBatched(symbols, "5Min", priorMinuteStart, priorMinuteEnd, ALPACA_FEED, 50, 4),
+    fetchBarsBatched(symbols, "1Min", tradeMinuteStart, tradeMinuteEnd, ALPACA_FEED, 50, 4)
   ]);
 
   const rows = [];
@@ -1079,7 +1810,7 @@ async function buildBacktest(dateStr, symbols) {
     const trade1 = trade1MinMap[symbol] || [];
     const mergedMinuteBars = [...prior5, ...trade1].sort((a, b) => new Date(a.t) - new Date(b.t));
 
-    const row = buildRocketRow({
+    const row = buildFullRocketRow({
       symbol,
       dailyBars,
       minuteBars: mergedMinuteBars,
@@ -1100,8 +1831,16 @@ async function buildBacktest(dateStr, symbols) {
   }
 
   rows.sort((a, b) => {
-    const aKey = decisionRank(a.decision) * 100000 + safeNum(a.patternScore, 0) * 100 + safeNum(a.premarketScore, 0);
-    const bKey = decisionRank(b.decision) * 100000 + safeNum(b.patternScore, 0) * 100 + safeNum(b.premarketScore, 0);
+    const aKey =
+      decisionRank(a.decision) * 100000 +
+      safeNum(a.patternScore, 0) * 100 +
+      safeNum(a.premarketScore, 0);
+
+    const bKey =
+      decisionRank(b.decision) * 100000 +
+      safeNum(b.patternScore, 0) * 100 +
+      safeNum(b.premarketScore, 0);
+
     return bKey - aKey;
   });
 
@@ -1110,164 +1849,12 @@ async function buildBacktest(dateStr, symbols) {
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
+    universeMode: "MANUAL_LIST",
+    discoveredUniverse: symbols.length,
+    quickPassed: symbols.length,
+    quickTop20: [],
     rows,
     summary: summarizeRows(rows)
-  };
-}
-
-async function buildLive(symbols) {
-  const session = getSessionLabelNow();
-  const today = getTodayNyDate();
-  const nowNy = getNowNyTime();
-
-  if (session === "weekend") {
-    return {
-      mode: "NO_MARKET",
-      session,
-      feed: ALPACA_FEED,
-      cutoffTime: null,
-      rows: [],
-      summary: { total: 0, strong: 0, buy: 0, watch: 0, topPicks: 0, avgEntryToHigh: null, hit15: 0, hit25: 0 },
-      message: "Hafta sonu."
-    };
-  }
-
-  const dailyLookbackStart = new Date(Date.now() - 140 * 86400000);
-  const minuteLookbackStart = new Date(Date.now() - 12 * 86400000);
-
-  const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
-  const dailyEnd = new Date().toISOString();
-
-  // after-hours / closed: nightly+structural+similarity shortlist only
-  if (session === "afterhours" || session === "closed") {
-    const dailyBarsMap = await fetchAllBars(symbols, "1Day", dailyStart, dailyEnd, ALPACA_FEED, 10000);
-    const rows = [];
-
-    for (const symbol of symbols) {
-      const fakeMinuteBars = [];
-      const row = buildRocketRow({
-        symbol,
-        dailyBars: dailyBarsMap[symbol] || [],
-        minuteBars: fakeMinuteBars,
-        tradeDate: today,
-        cutoffTime: "09:25:00"
-      });
-      if (!row) continue;
-
-      // premarket yoksa sadece watch/alma bırak
-      row.decision = row.patternScore >= 62 && row.ignitionScore >= 55 && row.structuralScore >= 45 ? "İZLE" : "ALMA";
-      row.entryType = row.decision === "İZLE" ? "WATCH_RECLAIM" : "NO_TRADE";
-      row.entryIdea = row.decision === "İZLE" ? roundSmart(safeNum(row.prevHigh, 0) * 1.01) : null;
-      row.stop = row.entryIdea ? roundSmart(row.entryIdea * 0.88) : null;
-      row.tp1 = row.entryIdea ? roundSmart(row.entryIdea * 1.15) : null;
-      row.tp2 = row.entryIdea ? roundSmart(row.entryIdea * 1.30) : null;
-
-      rows.push(row);
-    }
-
-    rows.sort((a, b) => {
-      const aKey = decisionRank(a.decision) * 100000 + safeNum(a.patternScore, 0) * 100 + safeNum(a.ignitionScore, 0);
-      const bKey = decisionRank(b.decision) * 100000 + safeNum(b.patternScore, 0) * 100 + safeNum(b.ignitionScore, 0);
-      return bKey - aKey;
-    });
-
-    return {
-      mode: "ROCKET_NIGHTLY",
-      session,
-      feed: ALPACA_FEED,
-      cutoffTime: null,
-      rows,
-      summary: summarizeRows(rows),
-      message: "After-hours / closed modunda rocket watchlist üretilir."
-    };
-  }
-
-  if (nowNy < "04:00:00") {
-    return {
-      mode: "WAIT_PREMARKET",
-      session,
-      feed: ALPACA_FEED,
-      cutoffTime: null,
-      rows: [],
-      summary: { total: 0, strong: 0, buy: 0, watch: 0, topPicks: 0, avgEntryToHigh: null, hit15: 0, hit25: 0 },
-      message: "Premarket henüz başlamadı. 04:00 ET sonrası tekrar dene."
-    };
-  }
-
-  let cutoffTime = "09:25:00";
-  if (session === "premarket") {
-    cutoffTime = nowNy > "09:25:00" ? "09:25:00" : nowNy;
-  }
-
-  const priorMinuteStart = zonedDateTimeToUtcISO(minuteLookbackStart.toISOString().slice(0, 10), "04:00");
-  const priorMinuteEnd = zonedDateTimeToUtcISO(today, "03:59");
-
-  const tradeMinuteStart = zonedDateTimeToUtcISO(today, "04:00");
-  const tradeMinuteEnd = new Date().toISOString();
-
-  const priorStartMs = new Date(priorMinuteStart).getTime();
-  const priorEndMs = new Date(priorMinuteEnd).getTime();
-  const tradeStartMs = new Date(tradeMinuteStart).getTime();
-  const tradeEndMs = new Date(tradeMinuteEnd).getTime();
-
-  if (!(tradeEndMs > tradeStartMs)) {
-    return {
-      mode: "WAITING_WINDOW",
-      session,
-      feed: ALPACA_FEED,
-      cutoffTime,
-      rows: [],
-      summary: { total: 0, strong: 0, buy: 0, watch: 0, topPicks: 0, avgEntryToHigh: null, hit15: 0, hit25: 0 },
-      message: "Trade minute penceresi henüz oluşmadı."
-    };
-  }
-
-  let prior5MinMap = {};
-  for (const s of symbols) prior5MinMap[s] = [];
-
-  const [dailyBarsMap, trade1MinMap] = await Promise.all([
-    fetchAllBars(symbols, "1Day", dailyStart, dailyEnd, ALPACA_FEED, 10000),
-    fetchAllBars(symbols, "1Min", tradeMinuteStart, tradeMinuteEnd, ALPACA_FEED, 10000)
-  ]);
-
-  if (priorEndMs > priorStartMs) {
-    prior5MinMap = await fetchAllBars(symbols, "5Min", priorMinuteStart, priorMinuteEnd, ALPACA_FEED, 10000);
-  }
-
-  const rows = [];
-
-  for (const symbol of symbols) {
-    const dailyBars = dailyBarsMap[symbol] || [];
-    const prior5 = prior5MinMap[symbol] || [];
-    const trade1 = trade1MinMap[symbol] || [];
-    const mergedMinuteBars = [...prior5, ...trade1].sort((a, b) => new Date(a.t) - new Date(b.t));
-
-    const row = buildRocketRow({
-      symbol,
-      dailyBars,
-      minuteBars: mergedMinuteBars,
-      tradeDate: today,
-      cutoffTime
-    });
-
-    if (!row) continue;
-    rows.push(row);
-  }
-
-  rows.sort((a, b) => {
-    const aKey = decisionRank(a.decision) * 100000 + safeNum(a.patternScore, 0) * 100 + safeNum(a.premarketScore, 0);
-    const bKey = decisionRank(b.decision) * 100000 + safeNum(b.patternScore, 0) * 100 + safeNum(b.premarketScore, 0);
-    return bKey - aKey;
-  });
-
-  return {
-    mode: "ROCKET_PREMARKET",
-    session,
-    feed: ALPACA_FEED,
-    cutoffTime,
-    rows,
-    summary: summarizeRows(rows),
-    message: null
   };
 }
 
@@ -1279,29 +1866,27 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-rocket", async (req, res) => {
+app.get("/api/live-supernova", async (req, res) => {
   try {
-    const symbols = parseSymbols(req.query.symbols);
-    const data = await buildLive(symbols);
+    const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_ROCKET error:", err);
+    console.error("LIVE_SUPERNOVA error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-rocket", async (req, res) => {
+app.get("/api/backtest-supernova", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
       return res.status(400).json({ error: "date parametresi YYYY-MM-DD formatında olmalı" });
     }
 
-    const symbols = parseSymbols(req.query.symbols);
-    const data = await buildBacktest(dateStr, symbols);
+    const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_ROCKET error:", err);
+    console.error("BACKTEST_SUPERNOVA error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -1315,5 +1900,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine running on port ${PORT}`);
+  console.log(`Rocket Engine v2 running on port ${PORT}`);
 });
