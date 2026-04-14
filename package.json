@@ -1,7 +1,7 @@
 {
-  "name": "rocket-engine-supernova",
-  "version": "1.0.0",
-  "description": "Supernova rocket engine for low-price explosive stock pattern detection",
+  "name": "rocket-engine-v2-discovery",
+  "version": "2.0.0",
+  "description": "Auto-discovery rocket engine for supernova-style stocks",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
