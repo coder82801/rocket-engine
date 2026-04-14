@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine - Supernova</title>
+  <title>Rocket Engine v2 — Supernova Discovery</title>
   <style>
     :root{
       --bg:#07111f;
@@ -25,7 +25,7 @@
       color:var(--text);
     }
     .wrap{
-      max-width:1550px;
+      max-width:1600px;
       margin:0 auto;
       padding:24px 16px 40px;
     }
@@ -192,13 +192,13 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine — Supernova</h1>
+      <h1>🚀 Rocket Engine v2 — Supernova Discovery</h1>
       <div class="sub">
-        Low-price explosive setup motoru.
+        Bu sürüm artık yalnızca verdiğin örnek listeyi puanlamaz.
         <br>
-        Structural + Ignition + Premarket + Pattern Similarity bloklarıyla çalışır.
+        Canlı tarafta, sembol alanı boşsa aktif ABD hisselerinden otomatik discovery yapar.
         <br>
-        Varsayılan evren: 0.10–5.00 bandındaki microcap/small-cap adaylar.
+        Backtest tarafı ise manuel sembol listesiyle pattern doğrulama içindir.
       </div>
 
       <div class="tabs">
@@ -209,11 +209,11 @@
 
     <div id="panel-live" class="panel active">
       <div class="card">
-        <h2>Canlı Rocket Tarama</h2>
+        <h2>Canlı Supernova Tarama</h2>
         <div class="grid">
           <div class="field full">
-            <label for="liveSymbols">Sembol listesi</label>
-            <textarea id="liveSymbols"></textarea>
+            <label for="liveSymbols">Sembol listesi (boş bırakırsan auto-discovery çalışır)</label>
+            <textarea id="liveSymbols" placeholder="Boş bırak = auto-discovery&#10;İstersen manuel liste de yazabilirsin: RMSG,CTMX,SOPA"></textarea>
           </div>
           <div class="field">
             <label for="liveMode">Mode</label>
@@ -233,7 +233,7 @@
           </div>
         </div>
 
-        <button id="btnLoadDefaults" type="button">Varsayılan listeyi yükle</button>
+        <button id="btnLoadDefaults" type="button">Örnek listeyi yükle</button>
         <button id="btnLive" type="button">Canlı tarama başlat</button>
 
         <div id="liveStatus" class="status muted">Hazır.</div>
@@ -241,7 +241,7 @@
       </div>
 
       <div class="card">
-        <h2>Top 3 Rocket Picks</h2>
+        <h2>Top 3 Picks</h2>
         <div id="liveTop" class="topcards">
           <div class="muted">Henüz veri yok.</div>
         </div>
@@ -280,23 +280,44 @@
           </table>
         </div>
       </div>
+
+      <div class="card">
+        <h2>Quick Discovery Top 20</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Quick Score</th>
+                <th>Price</th>
+                <th>Day Ret %</th>
+                <th>Day Vol</th>
+                <th>Dollar Vol</th>
+              </tr>
+            </thead>
+            <tbody id="quickRows">
+              <tr><td colspan="6" class="muted">Henüz discovery çalışmadı.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
     <div id="panel-backtest" class="panel">
       <div class="card">
-        <h2>Backtest Rocket</h2>
+        <h2>Backtest Supernova</h2>
         <div class="grid">
           <div class="field">
             <label for="btDate">Tarih</label>
             <input id="btDate" type="date" />
           </div>
           <div class="field full">
-            <label for="btSymbols">Sembol listesi</label>
-            <textarea id="btSymbols"></textarea>
+            <label for="btSymbols">Sembol listesi (zorunlu)</label>
+            <textarea id="btSymbols" placeholder="RMSG,CTMX,SOPA,RR,TNON"></textarea>
           </div>
         </div>
 
-        <button id="btnBtDefaults" type="button">Varsayılan listeyi yükle</button>
+        <button id="btnBtDefaults" type="button">Örnek listeyi yükle</button>
         <button id="btnBacktest" type="button">Backtest çalıştır</button>
 
         <div id="btStatus" class="status muted">Hazır.</div>
@@ -336,7 +357,7 @@
               </tr>
             </thead>
             <tbody id="btRows">
-              <tr><td colspan="17" class="muted">Henüzed">Henüz backtest yapılmadı.</td></tr>
+              <tr><td colspan="17" class="muted">Henüz backtest yapılmadı.</td></tr>
             </tbody>
           </table>
         </div>
@@ -415,11 +436,13 @@
       `).join("");
     }
 
-    function renderSummary(containerId, summary, extra = []) {
-      const s = summary || {};
-      const el = document.getElementById(containerId);
+    function renderSummary(containerId, data) {
+      const s = data.summary || {};
       const chips = [
-        ...extra,
+        `Mode: <b>${data.mode || "-"}</b>`,
+        `Universe Mode: <b>${data.universeMode || "-"}</b>`,
+        `Discovered Universe: <b>${data.discoveredUniverse ?? 0}</b>`,
+        `Quick Passed: <b>${data.quickPassed ?? 0}</b>`,
         `Toplam: <b>${s.total ?? 0}</b>`,
         `GÜÇLÜ AL: <b>${s.strong ?? 0}</b>`,
         `AL: <b>${s.buy ?? 0}</b>`,
@@ -429,7 +452,26 @@
         `Hit +15: <b>${s.hit15 ?? 0}</b>`,
         `Hit +25: <b>${s.hit25 ?? 0}</b>`
       ];
-      el.innerHTML = chips.map((x) => `<div class="chip">${x}</div>`).join("");
+      document.getElementById(containerId).innerHTML = chips.map((x) => `<div class="chip">${x}</div>`).join("");
+    }
+
+    function renderQuickRows(rows) {
+      const tbody = document.getElementById("quickRows");
+      if (!rows || !rows.length) {
+        tbody.innerHTML = `<tr><td colspan="6" class="muted">Quick discovery sonucu yok.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = rows.map((x) => `
+        <tr>
+          <td><b>${x.symbol}</b></td>
+          <td>${fmt(x.quickScore, 0)}</td>
+          <td>${fmt(x.price, x.price < 1 ? 4 : 2)}</td>
+          <td>${fmt(x.dayRet, 2)}</td>
+          <td>${x.dayVol ?? "-"}</td>
+          <td>${x.dollarVol ?? "-"}</td>
+        </tr>
+      `).join("");
     }
 
     function renderLive(data) {
@@ -438,11 +480,9 @@
       document.getElementById("liveFeed").value = data.feed || "-";
       document.getElementById("liveCutoff").value = data.cutoffTime || "-";
 
-      renderSummary("liveSummary", data.summary, [
-        `Mode: <b>${data.mode || "-"}</b>`
-      ]);
-
+      renderSummary("liveSummary", data);
       renderTop("liveTop", data.rows || []);
+      renderQuickRows(data.quickTop20 || []);
 
       const tbody = document.getElementById("liveRows");
       const rows = data.rows || [];
@@ -478,12 +518,7 @@
     }
 
     function renderBacktest(data) {
-      renderSummary("btSummary", data.summary, [
-        `Trade Date: <b>${data.tradeDate || "-"}</b>`,
-        `Feed: <b>${data.feed || "-"}</b>`,
-        `Mode: <b>${data.mode || "-"}</b>`
-      ]);
-
+      renderSummary("btSummary", data);
       renderTop("btTop", data.rows || []);
 
       const tbody = document.getElementById("btRows");
@@ -526,9 +561,12 @@
 
     async function runLive() {
       try {
-        setStatus("liveStatus", "Canlı rocket tarama çalışıyor...", "warn");
+        setStatus("liveStatus", "Canlı discovery + supernova tarama çalışıyor...", "warn");
         const symbols = parseSymbols(document.getElementById("liveSymbols").value);
-        const data = await apiJson(`/api/live-rocket?symbols=${encodeURIComponent(symbols.join(","))}`);
+        const query = symbols.length
+          ? `?symbols=${encodeURIComponent(symbols.join(","))}`
+          : "";
+        const data = await apiJson(`/api/live-supernova${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -542,9 +580,11 @@
         setStatus("btStatus", "Backtest çalışıyor...", "warn");
         const date = document.getElementById("btDate").value;
         const symbols = parseSymbols(document.getElementById("btSymbols").value);
-        if (!date) throw new Error("Tarih seç.");
 
-        const data = await apiJson(`/api/backtest-rocket?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        if (!date) throw new Error("Tarih seç.");
+        if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
+
+        const data = await apiJson(`/api/backtest-supernova?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
@@ -582,9 +622,9 @@
       setDefaultDate();
       try {
         const health = await apiJson("/test");
-        await loadDefaults();
         setStatus("liveStatus", health.status || "Hazır.", "ok");
         setStatus("btStatus", health.status || "Hazır.", "ok");
+        document.getElementById("btSymbols").value = (await apiJson("/api/default-symbols")).symbols.join(",");
       } catch (err) {
         console.error(err);
         setStatus("liveStatus", "Sunucu bağlantısı kurulamadı.", "bad");
