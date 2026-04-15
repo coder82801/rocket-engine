@@ -170,6 +170,17 @@ const FAMILY_MODELS = [
 const ASSET_CACHE = { expiresAt: 0, data: null };
 const DISCOVERY_CACHE = { expiresAt: 0, key: "", data: null };
 
+const CONFIRM_RULES = {
+  triggerTolerance: 0.995,
+  nearTolerance: 0.985,
+  minPremarketVolume: 25000,
+  minPremarketDollarVolume: 100000,
+  minSparseVolume: 5000,
+  minSparseDollarVolume: 25000,
+  minHoldQuality: 55,
+  strongHoldQuality: 65
+};
+
 function safeNum(v, fallback = 0) {
   if (v === null || v === undefined || v === "") return fallback;
   const n = Number(v);
@@ -334,9 +345,9 @@ function getSessionLabelNow() {
 }
 
 function decisionRank(decision) {
-  if (decision === "GÜÇLÜ AL") return 4;
-  if (decision === "AL") return 3;
-  if (decision === "İZLE") return 2;
+  if (decision === "SUPERNOVA_CONFIRMED" || decision === "GÜÇLÜ AL") return 5;
+  if (decision === "AL") return 4;
+  if (decision === "MANUAL_CONFIRM_REQUIRED" || decision === "SPARSE_PREMARKET" || decision === "WATCH_TRIGGER" || decision === "İZLE") return 2;
   return 1;
 }
 
@@ -1149,7 +1160,7 @@ function computeFamilyFits(featureSet) {
 }
 
 function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
-  if (!["GÜÇLÜ AL", "AL", "İZLE"].includes(decision)) {
+  if (!["SUPERNOVA_CONFIRMED", "GÜÇLÜ AL", "AL", "MANUAL_CONFIRM_REQUIRED", "SPARSE_PREMARKET", "WATCH_TRIGGER", "İZLE"].includes(decision)) {
     return {
       entryType: "NO_TRADE",
       entryIdea: null,
@@ -1195,6 +1206,99 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
     stop: roundSmart(entryIdea * 0.88),
     tp1: roundSmart(entryIdea * 1.20),
     tp2: roundSmart(entryIdea * 1.50)
+  };
+}
+
+function isNightlyWatchEligible({ structuralScore, ignitionScore, formerRunnerScore, familyScore, supernovaScore }) {
+  return (
+    structuralScore >= 36 &&
+    ignitionScore >= 48 &&
+    formerRunnerScore >= 20 &&
+    familyScore >= 58 &&
+    supernovaScore >= 60
+  );
+}
+
+function buildMorningConfirmation({
+  baseDecision,
+  setupEligible,
+  pre,
+  entryIdea
+}) {
+  const price = safeNum(pre.price, null);
+  const hasPrice = price != null && Number.isFinite(price);
+  const triggerHit = hasPrice && entryIdea != null && price >= entryIdea;
+  const triggerNear = hasPrice && entryIdea != null && price >= entryIdea * CONFIRM_RULES.nearTolerance;
+  const liquidityStrong =
+    safeNum(pre.preVol, 0) >= CONFIRM_RULES.minPremarketVolume ||
+    safeNum(pre.preDollarVol, 0) >= CONFIRM_RULES.minPremarketDollarVolume;
+  const liquiditySparse =
+    safeNum(pre.preVol, 0) >= CONFIRM_RULES.minSparseVolume ||
+    safeNum(pre.preDollarVol, 0) >= CONFIRM_RULES.minSparseDollarVolume;
+  const qualityOk = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= CONFIRM_RULES.minHoldQuality;
+  const qualityStrong = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= CONFIRM_RULES.strongHoldQuality;
+
+  let confirmScore = 0;
+  if (triggerHit) confirmScore += 45;
+  else if (triggerNear) confirmScore += 20;
+  if (liquidityStrong) confirmScore += 30;
+  else if (liquiditySparse) confirmScore += 12;
+  if (qualityOk) confirmScore += 15;
+  if (qualityStrong) confirmScore += 5;
+  if (pre.abovePrevHigh) confirmScore += 5;
+  confirmScore = clamp(Math.round(confirmScore), 0, 100);
+
+  if (pre.source !== "REAL_PREMARKET") {
+    return {
+      decision: setupEligible ? "MANUAL_CONFIRM_REQUIRED" : baseDecision,
+      confirmStatus: "NO_PREMARKET_CONFIRM",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: setupEligible ? ["Premarket teyidi yok: manuel kontrol gerekli"] : ["Premarket teyidi yok"]
+    };
+  }
+
+  if (triggerHit && liquidityStrong && qualityStrong) {
+    return {
+      decision: "SUPERNOVA_CONFIRMED",
+      confirmStatus: "CONFIRMED",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: ["Entry tetiklendi", "Premarket likiditesi yeterli", "VWAP üstünde teyit"]
+    };
+  }
+
+  if (triggerHit && liquiditySparse && qualityOk) {
+    return {
+      decision: "AL",
+      confirmStatus: "TRIGGER_OK",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: ["Entry tetiklendi", "Likidite sınırlı ama yeterli"]
+    };
+  }
+
+  if (setupEligible && (triggerNear || liquiditySparse)) {
+    return {
+      decision: "SPARSE_PREMARKET",
+      confirmStatus: "SPARSE_DATA",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: ["Kurulum korunuyor", "Veri/hacim sınırlı", "Confirmed deme"]
+    };
+  }
+
+  return {
+    decision: baseDecision,
+    confirmStatus: "NO_TRIGGER",
+    confirmScore,
+    triggerHit,
+    triggerNear,
+    notes: ["Tetik gelmedi"]
   };
 }
 
@@ -1458,9 +1562,9 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     family.familyScore
   );
 
-  let decision = "ALMA";
+  let baseDecision = "ALMA";
   if (!structural.hardReject && !premarket.hardReject) {
-    decision = finalLiveDecision({
+    baseDecision = finalLiveDecision({
       structuralScore: structural.score,
       ignitionScore: ignition.score,
       formerRunnerScore: formerRunner.score,
@@ -1472,11 +1576,33 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     });
   }
 
+  const setupEligible = isNightlyWatchEligible({
+    structuralScore: structural.score,
+    ignitionScore: ignition.score,
+    formerRunnerScore: formerRunner.score,
+    familyScore: family.familyScore,
+    supernovaScore
+  });
+
+  const provisionalPlan = buildEntryPlan(baseDecision === "ALMA" && setupEligible ? "İZLE" : baseDecision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
+  const confirmation = buildMorningConfirmation({
+    baseDecision,
+    setupEligible,
+    pre: preMetrics,
+    entryIdea: provisionalPlan.entryIdea
+  });
+
+  const decision = confirmation.decision;
   const plan = buildEntryPlan(decision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
 
   return {
     symbol,
     decision,
+    baseDecision,
+    confirmStatus: confirmation.confirmStatus,
+    confirmScore: confirmation.confirmScore,
+    triggerHit: confirmation.triggerHit,
+    triggerNear: confirmation.triggerNear,
     supernovaScore,
     structuralScore: structural.score,
     ignitionScore: ignition.score,
@@ -1535,7 +1661,8 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
       ...ignition.notes,
       ...formerRunner.notes,
       ...rotation.notes,
-      ...premarket.notes
+      ...premarket.notes,
+      ...confirmation.notes
     ].join(" | ")
   };
 }
@@ -1582,16 +1709,20 @@ function buildBacktestOutcome(tradeDayMinuteBars, tradeDate, entryIdea) {
 }
 
 function summarizeRows(rows) {
-  const picks = rows.filter((r) => r.decision === "GÜÇLÜ AL" || r.decision === "AL").slice(0, 3);
+  const strongSet = new Set(["SUPERNOVA_CONFIRMED", "GÜÇLÜ AL"]);
+  const buySet = new Set(["AL"]);
+  const watchSet = new Set(["İZLE", "MANUAL_CONFIRM_REQUIRED", "SPARSE_PREMARKET", "WATCH_TRIGGER"]);
+
+  const picks = rows.filter((r) => strongSet.has(r.decision) || buySet.has(r.decision)).slice(0, 3);
   const vals = picks
     .map((r) => safeNum(r.realizedEntryToHighPct, null))
     .filter((v) => v != null);
 
   return {
     total: rows.length,
-    strong: rows.filter((r) => r.decision === "GÜÇLÜ AL").length,
-    buy: rows.filter((r) => r.decision === "AL").length,
-    watch: rows.filter((r) => r.decision === "İZLE").length,
+    strong: rows.filter((r) => strongSet.has(r.decision)).length,
+    buy: rows.filter((r) => buySet.has(r.decision)).length,
+    watch: rows.filter((r) => watchSet.has(r.decision)).length,
     topPicks: picks.length,
     avgEntryToHigh: vals.length ? roundSmart(avg(vals)) : null,
     hit15: vals.filter((v) => v >= 15).length,
@@ -1749,7 +1880,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   if (session === "afterhours" || session === "closed") {
     const topNightly = nightlyRows.slice(0, 40);
     return {
-      mode: "AUTO_ROCKET_NIGHTLY_V32",
+      mode: "AUTO_ROCKET_NIGHTLY_V33",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1847,7 +1978,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   });
 
   return {
-    mode: "AUTO_ROCKET_PREMARKET_V32",
+    mode: "AUTO_ROCKET_PREMARKET_V33",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -1897,7 +2028,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
     });
 
     return {
-      mode: "MANUAL_ROCKET_NIGHTLY_V32",
+      mode: "MANUAL_ROCKET_NIGHTLY_V33",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1977,7 +2108,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   });
 
   return {
-    mode: "MANUAL_ROCKET_PREMARKET_V32",
+    mode: "MANUAL_ROCKET_PREMARKET_V33",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2110,7 +2241,7 @@ async function buildBacktest(dateStr, symbolsRaw) {
   });
 
   return {
-    mode: "ROCKET_BACKTEST_V32",
+    mode: "ROCKET_BACKTEST_V33",
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
@@ -2131,17 +2262,17 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova-v32", async (req, res) => {
+app.get("/api/live-supernova-v33", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_SUPERNOVA_V32 error:", err);
+    console.error("LIVE_SUPERNOVA_V33 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-supernova-v32", async (req, res) => {
+app.get("/api/backtest-supernova-v33", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -2151,7 +2282,7 @@ app.get("/api/backtest-supernova-v32", async (req, res) => {
     const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_SUPERNOVA_V32 error:", err);
+    console.error("BACKTEST_SUPERNOVA_V33 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -2165,5 +2296,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v3.2 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.3 running on port ${PORT}`);
 });
