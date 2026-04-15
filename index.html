@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine v2 — Supernova Discovery</title>
+  <title>Rocket Engine v3.1 — Family Supernova</title>
   <style>
     :root{
       --bg:#07111f;
@@ -25,7 +25,7 @@
       color:var(--text);
     }
     .wrap{
-      max-width:1600px;
+      max-width:1700px;
       margin:0 auto;
       padding:24px 16px 40px;
     }
@@ -192,13 +192,18 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine v2 — Supernova Discovery</h1>
+      <h1>🚀 Rocket Engine v3.1 — Family Supernova</h1>
       <div class="sub">
-        Bu sürüm artık yalnızca verdiğin örnek listeyi puanlamaz.
+        Bu sürümde artık ek olarak
+        <b>Former Runner</b>,
+        <b>Halt Proxy</b>,
+        <b>Rotation</b>
+        ve
+        <b>Catalyst Grade</b>
+        mantığı var.
         <br>
-        Canlı tarafta, sembol alanı boşsa aktif ABD hisselerinden otomatik discovery yapar.
-        <br>
-        Backtest tarafı ise manuel sembol listesiyle pattern doğrulama içindir.
+        Boş sembol alanı = auto-discovery.
+        Backtest tarafı = manuel liste doğrulaması.
       </div>
 
       <div class="tabs">
@@ -212,8 +217,8 @@
         <h2>Canlı Supernova Tarama</h2>
         <div class="grid">
           <div class="field full">
-            <label for="liveSymbols">Sembol listesi (boş bırakırsan auto-discovery çalışır)</label>
-            <textarea id="liveSymbols" placeholder="Boş bırak = auto-discovery&#10;İstersen manuel liste de yazabilirsin: RMSG,CTMX,SOPA"></textarea>
+            <label for="liveSymbols">Sembol listesi (boş = auto-discovery)</label>
+            <textarea id="liveSymbols" placeholder="Boş bırak = auto-discovery&#10;Manuel örnek: RMSG,ROLR,RAYA,CUE"></textarea>
           </div>
           <div class="field">
             <label for="liveMode">Mode</label>
@@ -254,12 +259,15 @@
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Supernova</th>
                 <th>Struct</th>
                 <th>Ignite</th>
+                <th>Former</th>
+                <th>Rotation</th>
                 <th>Premkt</th>
-                <th>Pattern</th>
+                <th>Family</th>
                 <th>Symbol</th>
-                <th>Pattern Name</th>
+                <th>Best Family</th>
                 <th>Source</th>
                 <th>Price</th>
                 <th>Gap %</th>
@@ -270,12 +278,13 @@
                 <th>Stop</th>
                 <th>TP1</th>
                 <th>TP2</th>
-                <th>Matches</th>
+                <th>Former/Halt</th>
+                <th>Family Matches</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody id="liveRows">
-              <tr><td colspan="19" class="muted">Henüz tarama yapılmadı.</td></tr>
+              <tr><td colspan="23" class="muted">Henüz tarama yapılmadı.</td></tr>
             </tbody>
           </table>
         </div>
@@ -312,8 +321,8 @@
             <input id="btDate" type="date" />
           </div>
           <div class="field full">
-            <label for="btSymbols">Sembol listesi (zorunlu)</label>
-            <textarea id="btSymbols" placeholder="RMSG,CTMX,SOPA,RR,TNON"></textarea>
+            <label for="btSymbols">Sembol listesi</label>
+            <textarea id="btSymbols" placeholder="RMSG,ROLR,RAYA,CUE,ELAB,CYCN"></textarea>
           </div>
         </div>
 
@@ -338,12 +347,15 @@
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Supernova</th>
                 <th>Struct</th>
                 <th>Ignite</th>
+                <th>Former</th>
+                <th>Rotation</th>
                 <th>Premkt</th>
-                <th>Pattern</th>
+                <th>Family</th>
                 <th>Symbol</th>
-                <th>Pattern Name</th>
+                <th>Best Family</th>
                 <th>Price</th>
                 <th>Gap %</th>
                 <th>Vol Ratio</th>
@@ -352,12 +364,13 @@
                 <th>Entry Reached</th>
                 <th>Entry→High %</th>
                 <th>Open→High %</th>
-                <th>Matches</th>
+                <th>Former/Halt</th>
+                <th>Family Matches</th>
                 <th>Notes</th>
               </tr>
             </thead>
             <tbody id="btRows">
-              <tr><td colspan="17" class="muted">Henüz backtest yapılmadı.</td></tr>
+              <tr><td colspan="21" class="muted">Henüz backtest yapılmadı.</td></tr>
             </tbody>
           </table>
         </div>
@@ -423,14 +436,16 @@
           <div class="sym">#${i + 1} ${x.symbol}</div>
           <div class="${badge(x.decision)}">${x.decision}</div>
           <div class="kv">
+            <div><span class="k">Supernova</span>${fmt(x.supernovaScore, 0)}</div>
             <div><span class="k">Struct</span>${fmt(x.structuralScore, 0)}</div>
             <div><span class="k">Ignite</span>${fmt(x.ignitionScore, 0)}</div>
+            <div><span class="k">Former</span>${fmt(x.formerRunnerScore, 0)}</div>
+            <div><span class="k">Rotation</span>${fmt(x.rotationScore, 0)}</div>
             <div><span class="k">Premkt</span>${fmt(x.premarketScore, 0)}</div>
-            <div><span class="k">Pattern</span>${fmt(x.patternScore, 0)}</div>
+            <div><span class="k">Family</span>${fmt(x.familyScore, 0)}</div>
+            <div><span class="k">Best Family</span>${x.bestFamily || "-"}</div>
             <div><span class="k">Entry Type</span>${x.entryType || "-"}</div>
             <div><span class="k">Entry</span>${x.entryIdea == null ? "-" : fmt(x.entryIdea, x.entryIdea < 1 ? 4 : 2)}</div>
-            <div><span class="k">Best Pattern</span>${x.bestPattern || "-"}</div>
-            <div><span class="k">Source</span>${x.source || "-"}</div>
           </div>
         </div>
       `).join("");
@@ -474,6 +489,10 @@
       `).join("");
     }
 
+    function formerText(x) {
+      return `E252:${x.explosiveDays252 ?? 0} | E63:${x.explosiveDays63 ?? 0} | H252:${x.haltProxyDays252 ?? 0} | H63:${x.haltProxyDays63 ?? 0}`;
+    }
+
     function renderLive(data) {
       document.getElementById("liveMode").value = data.mode || "-";
       document.getElementById("liveSession").value = data.session || "-";
@@ -488,19 +507,22 @@
       const rows = data.rows || [];
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="19" class="muted">${data.message || "Aday bulunamadı."}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="23" class="muted">${data.message || "Aday bulunamadı."}</td></tr>`;
         return;
       }
 
       tbody.innerHTML = rows.map((x) => `
         <tr>
           <td class="${decisionClass(x.decision)}">${x.decision}</td>
+          <td>${fmt(x.supernovaScore, 0)}</td>
           <td>${fmt(x.structuralScore, 0)}</td>
           <td>${fmt(x.ignitionScore, 0)}</td>
+          <td>${fmt(x.formerRunnerScore, 0)}</td>
+          <td>${fmt(x.rotationScore, 0)}</td>
           <td>${fmt(x.premarketScore, 0)}</td>
-          <td>${fmt(x.patternScore, 0)}</td>
+          <td>${fmt(x.familyScore, 0)}</td>
           <td><b>${x.symbol}</b></td>
-          <td>${x.bestPattern || "-"}</td>
+          <td>${x.bestFamily || "-"}</td>
           <td>${x.source || "-"}</td>
           <td>${x.price == null ? "-" : fmt(x.price, x.price < 1 ? 4 : 2)}</td>
           <td>${x.gapPct == null ? "-" : fmt(x.gapPct, 2)}</td>
@@ -511,7 +533,8 @@
           <td>${x.stop == null ? "-" : fmt(x.stop, x.stop < 1 ? 4 : 2)}</td>
           <td>${x.tp1 == null ? "-" : fmt(x.tp1, x.tp1 < 1 ? 4 : 2)}</td>
           <td>${x.tp2 == null ? "-" : fmt(x.tp2, x.tp2 < 1 ? 4 : 2)}</td>
-          <td style="text-align:left;white-space:normal;min-width:220px">${x.topMatches || ""}</td>
+          <td style="text-align:left;white-space:normal;min-width:220px">${formerText(x)}</td>
+          <td style="text-align:left;white-space:normal;min-width:240px">${x.familyMatches || ""}</td>
           <td style="text-align:left;white-space:normal;min-width:320px">${x.notes || ""}</td>
         </tr>
       `).join("");
@@ -525,19 +548,22 @@
       const rows = data.rows || [];
 
       if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="17" class="muted">Sonuç bulunamadı.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="21" class="muted">Sonuç bulunamadı.</td></tr>`;
         return;
       }
 
       tbody.innerHTML = rows.map((x) => `
         <tr>
           <td class="${decisionClass(x.decision)}">${x.decision}</td>
+          <td>${fmt(x.supernovaScore, 0)}</td>
           <td>${fmt(x.structuralScore, 0)}</td>
           <td>${fmt(x.ignitionScore, 0)}</td>
+          <td>${fmt(x.formerRunnerScore, 0)}</td>
+          <td>${fmt(x.rotationScore, 0)}</td>
           <td>${fmt(x.premarketScore, 0)}</td>
-          <td>${fmt(x.patternScore, 0)}</td>
+          <td>${fmt(x.familyScore, 0)}</td>
           <td><b>${x.symbol}</b></td>
-          <td>${x.bestPattern || "-"}</td>
+          <td>${x.bestFamily || "-"}</td>
           <td>${x.price == null ? "-" : fmt(x.price, x.price < 1 ? 4 : 2)}</td>
           <td>${x.gapPct == null ? "-" : fmt(x.gapPct, 2)}</td>
           <td>${fmt(x.preVolRatio, 2)}</td>
@@ -546,7 +572,8 @@
           <td>${x.entryReached ? "YES" : "NO"}</td>
           <td>${x.realizedEntryToHighPct == null ? "-" : fmt(x.realizedEntryToHighPct, 2)}</td>
           <td>${x.realizedOpenToHighPct == null ? "-" : fmt(x.realizedOpenToHighPct, 2)}</td>
-          <td style="text-align:left;white-space:normal;min-width:220px">${x.topMatches || ""}</td>
+          <td style="text-align:left;white-space:normal;min-width:220px">${formerText(x)}</td>
+          <td style="text-align:left;white-space:normal;min-width:240px">${x.familyMatches || ""}</td>
           <td style="text-align:left;white-space:normal;min-width:320px">${x.notes || ""}</td>
         </tr>
       `).join("");
@@ -561,12 +588,12 @@
 
     async function runLive() {
       try {
-        setStatus("liveStatus", "Canlı discovery + supernova tarama çalışıyor...", "warn");
+        setStatus("liveStatus", "Canlı supernova tarama çalışıyor...", "warn");
         const symbols = parseSymbols(document.getElementById("liveSymbols").value);
         const query = symbols.length
           ? `?symbols=${encodeURIComponent(symbols.join(","))}`
           : "";
-        const data = await apiJson(`/api/live-supernova${query}`);
+        const data = await apiJson(`/api/live-supernova-v31${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -584,7 +611,7 @@
         if (!date) throw new Error("Tarih seç.");
         if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
 
-        const data = await apiJson(`/api/backtest-supernova?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        const data = await apiJson(`/api/backtest-supernova-v31?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
@@ -624,7 +651,7 @@
         const health = await apiJson("/test");
         setStatus("liveStatus", health.status || "Hazır.", "ok");
         setStatus("btStatus", health.status || "Hazır.", "ok");
-        document.getElementById("btSymbols").value = (await apiJson("/api/default-symbols")).symbols.join(",");
+        await loadDefaults();
       } catch (err) {
         console.error(err);
         setStatus("liveStatus", "Sunucu bağlantısı kurulamadı.", "bad");
