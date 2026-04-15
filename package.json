@@ -1,7 +1,7 @@
 {
   "name": "rocket-engine-v31",
-  "version": "3.1.0",
-  "description": "Rocket Engine v3.1 - family supernova discovery with former runner and halt proxy scoring",
+  "version": "3.2.0",
+  "description": "Rocket Engine v3.2 - family supernova discovery with former runner, rotation proxy and narrative pivot scoring",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
