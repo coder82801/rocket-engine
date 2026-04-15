@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine v3.1 — Family Supernova</title>
+  <title>Rocket Engine v3.2 — Family Supernova</title>
   <style>
     :root{
       --bg:#07111f;
@@ -192,15 +192,9 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine v3.1 — Family Supernova</h1>
+      <h1>🚀 Rocket Engine v3.2 — Family Supernova</h1>
       <div class="sub">
-        Bu sürümde artık ek olarak
-        <b>Former Runner</b>,
-        <b>Halt Proxy</b>,
-        <b>Rotation</b>
-        ve
-        <b>Catalyst Grade</b>
-        mantığı var.
+        Bu sürümde ek olarak <b>Former Runner</b>, <b>Halt Proxy</b>, <b>Rotation Proxy</b>, <b>Narrative Pivot</b> ve <b>Catalyst Grade</b> mantığı var.
         <br>
         Boş sembol alanı = auto-discovery.
         Backtest tarafı = manuel liste doğrulaması.
@@ -218,7 +212,7 @@
         <div class="grid">
           <div class="field full">
             <label for="liveSymbols">Sembol listesi (boş = auto-discovery)</label>
-            <textarea id="liveSymbols" placeholder="Boş bırak = auto-discovery&#10;Manuel örnek: RMSG,ROLR,RAYA,CUE"></textarea>
+            <textarea id="liveSymbols" placeholder="Boş bırak = auto-discovery&#10;Manuel örnek: RMSG,ROLR,BIRD,RAYA,CUE"></textarea>
           </div>
           <div class="field">
             <label for="liveMode">Mode</label>
@@ -322,7 +316,7 @@
           </div>
           <div class="field full">
             <label for="btSymbols">Sembol listesi</label>
-            <textarea id="btSymbols" placeholder="RMSG,ROLR,RAYA,CUE,ELAB,CYCN"></textarea>
+            <textarea id="btSymbols" placeholder="RMSG,ROLR,BIRD,RAYA,CUE,ELAB,CYCN"></textarea>
           </div>
         </div>
 
@@ -593,7 +587,7 @@
         const query = symbols.length
           ? `?symbols=${encodeURIComponent(symbols.join(","))}`
           : "";
-        const data = await apiJson(`/api/live-supernova-v31${query}`);
+        const data = await apiJson(`/api/live-supernova-v32${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -611,7 +605,7 @@
         if (!date) throw new Error("Tarih seç.");
         if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
 
-        const data = await apiJson(`/api/backtest-supernova-v31?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        const data = await apiJson(`/api/backtest-supernova-v32?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
