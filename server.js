@@ -14,9 +14,8 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 const DEFAULT_SYMBOLS = [
-  "RMSG","CTMX","SOPA","RR","TNON","SIDU",
-  "SQFT","FUSE","CREG","SKYQ","GN","MAXN",
-  "IPST","TPST","RAYA","CUE"
+  "RMSG", "ROLR", "RAYA", "CUE", "ELAB", "CYCN", "VCX", "LPA",
+  "CTMX", "SOPA", "RR", "TNON", "SIDU", "SQFT", "FUSE", "CREG"
 ];
 
 const ALLOWED_EXCHANGES = new Set(["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]);
@@ -25,6 +24,22 @@ const BAD_NAME_TOKENS = [
   "ETN", "PREFERRED", "PFD", "DEPOSITARY", "ADR"
 ];
 
+const CATALYST_GRADES = {
+  none: 0,
+  generic_sector_news: 8,
+  compliance_regime_change: 18,
+  strategic_collaboration: 20,
+  ai_transition: 18,
+  prediction_market_pivot: 18,
+  biotech_data: 26,
+  fda: 30,
+  contract_award: 24,
+  balance_sheet: 12,
+  financing: -12,
+  offering: -18,
+  reverse_split: -30
+};
+
 const SYMBOL_FLAGS = {
   RMSG: {
     recentReverseSplit: false,
@@ -32,23 +47,35 @@ const SYMBOL_FLAGS = {
     recentDeficiency: true,
     catalystFresh: true,
     catalystType: "strategic_collaboration",
-    allowAbove5: false
+    allowAbove8: false,
+    marketCapOverride: 25800000,
+    floatOverride: 6500000
   },
-  SOPA: {
+  ROLR: {
     recentReverseSplit: false,
     otcRisk: false,
     recentDeficiency: false,
-    catalystFresh: false,
-    catalystType: "none",
-    allowAbove5: false
+    catalystFresh: true,
+    catalystType: "compliance_regime_change",
+    allowAbove8: true,
+    marketCapOverride: 80696000,
+    floatOverride: 9000000
   },
-  TNON: {
-    recentReverseSplit: false,
-    otcRisk: false,
-    recentDeficiency: false,
-    catalystFresh: false,
-    catalystType: "none",
-    allowAbove5: false
+  RAYA: {
+    catalystFresh: true,
+    catalystType: "contract_award"
+  },
+  CUE: {
+    catalystFresh: true,
+    catalystType: "biotech_data"
+  },
+  ELAB: {
+    catalystFresh: true,
+    catalystType: "biotech_data"
+  },
+  CYCN: {
+    catalystFresh: true,
+    catalystType: "biotech_data"
   },
   IREN: {
     recentReverseSplit: false,
@@ -56,116 +83,64 @@ const SYMBOL_FLAGS = {
     recentDeficiency: false,
     catalystFresh: true,
     catalystType: "ai_transition",
-    allowAbove5: true
+    allowAbove8: true,
+    marketCapOverride: 14289000000
   }
 };
 
-const ROCKET_PROTOTYPES = [
+const FAMILY_MODELS = [
   {
-    name: "RMSG_STYLE_SUPERNOVA",
-    weights: {
-      price: 10,
-      drawdown90: 8,
-      baseTightness10: 8,
-      prevDayRet: 9,
-      prevVolRatio: 10,
-      prevCloseStrength: 10,
-      breakout20: 6,
-      gapPct: 8,
-      preVolRatio: 10,
-      holdQuality: 10,
-      preDollarVol: 8,
-      abovePrevHigh: 3
-    },
-    bands: {
-      price: [0.10, 3.50, 0.05, 5.00],
-      drawdown90: [-90, -25, -99, -5],
-      baseTightness10: [5, 35, 0, 80],
-      prevDayRet: [5, 45, -10, 90],
-      prevVolRatio: [2, 15, 0.5, 40],
-      prevCloseStrength: [75, 100, 45, 100],
-      breakout20: [1, 1, 0, 1],
-      gapPct: [10, 80, -10, 150],
-      preVolRatio: [1.2, 10, 0.2, 30],
-      holdQuality: [65, 100, 40, 100],
-      preDollarVol: [200000, 20000000, 50000, 80000000],
-      abovePrevHigh: [1, 1, 0, 1]
+    name: "COLLAPSE_RECOVERY",
+    features: {
+      price: { weight: 10, ideal: [0.10, 3.00], hard: [0.05, 6.00] },
+      drawdown90: { weight: 12, ideal: [-92, -35], hard: [-99, -5] },
+      baseTightness10: { weight: 10, ideal: [4, 28], hard: [0, 80] },
+      prevDayRet: { weight: 8, ideal: [5, 35], hard: [-10, 90] },
+      prevVolRatio: { weight: 10, ideal: [2, 15], hard: [0.5, 50] },
+      prevDollarShock: { weight: 10, ideal: [2, 15], hard: [0.5, 50] },
+      prevCloseStrength: { weight: 10, ideal: [72, 100], hard: [40, 100] },
+      breakout20: { weight: 6, ideal: [1, 1], hard: [0, 1] },
+      gapPct: { weight: 6, ideal: [5, 60], hard: [-10, 150] },
+      preVolRatio: { weight: 8, ideal: [1, 8], hard: [0.2, 30] },
+      holdQuality: { weight: 10, ideal: [65, 100], hard: [35, 100] }
     }
   },
   {
-    name: "SQUEEZE_RECLAIM_STYLE",
-    weights: {
-      price: 9,
-      drawdown90: 8,
-      baseTightness10: 9,
-      prevDayRet: 10,
-      prevVolRatio: 10,
-      prevCloseStrength: 10,
-      breakout20: 7,
-      gapPct: 7,
-      preVolRatio: 8,
-      holdQuality: 9,
-      preDollarVol: 8,
-      abovePrevHigh: 5
-    },
-    bands: {
-      price: [0.25, 5.00, 0.10, 7.00],
-      drawdown90: [-80, -20, -99, 0],
-      baseTightness10: [3, 25, 0, 60],
-      prevDayRet: [12, 60, -5, 120],
-      prevVolRatio: [2, 12, 0.5, 35],
-      prevCloseStrength: [78, 100, 50, 100],
-      breakout20: [1, 1, 0, 1],
-      gapPct: [5, 50, -10, 100],
-      preVolRatio: [1.0, 8, 0.2, 20],
-      holdQuality: [70, 100, 45, 100],
-      preDollarVol: [150000, 15000000, 40000, 60000000],
-      abovePrevHigh: [1, 1, 0, 1]
+    name: "SQUEEZE_RECLAIM",
+    features: {
+      price: { weight: 8, ideal: [0.20, 5.00], hard: [0.10, 8.00] },
+      drawdown90: { weight: 6, ideal: [-80, -15], hard: [-99, 0] },
+      baseTightness10: { weight: 9, ideal: [3, 24], hard: [0, 60] },
+      prevDayRet: { weight: 12, ideal: [12, 70], hard: [-5, 150] },
+      prevVolRatio: { weight: 12, ideal: [2, 20], hard: [0.5, 80] },
+      prevDollarShock: { weight: 10, ideal: [2, 20], hard: [0.5, 80] },
+      prevCloseStrength: { weight: 12, ideal: [78, 100], hard: [45, 100] },
+      breakout20: { weight: 8, ideal: [1, 1], hard: [0, 1] },
+      gapPct: { weight: 7, ideal: [5, 50], hard: [-10, 120] },
+      preVolRatio: { weight: 6, ideal: [1, 10], hard: [0.2, 35] },
+      holdQuality: { weight: 10, ideal: [70, 100], hard: [40, 100] }
     }
   },
   {
-    name: "RECOVERY_IGNITION_STYLE",
-    weights: {
-      price: 8,
-      drawdown90: 10,
-      baseTightness10: 7,
-      prevDayRet: 8,
-      prevVolRatio: 10,
-      prevCloseStrength: 8,
-      breakout20: 6,
-      gapPct: 6,
-      preVolRatio: 8,
-      holdQuality: 8,
-      preDollarVol: 10,
-      abovePrevHigh: 3
-    },
-    bands: {
-      price: [0.20, 5.00, 0.05, 7.00],
-      drawdown90: [-95, -40, -99, -10],
-      baseTightness10: [4, 30, 0, 70],
-      prevDayRet: [4, 30, -10, 70],
-      prevVolRatio: [1.5, 8, 0.3, 25],
-      prevCloseStrength: [70, 100, 40, 100],
-      breakout20: [0, 1, 0, 1],
-      gapPct: [2, 30, -10, 80],
-      preVolRatio: [0.8, 6, 0.1, 20],
-      holdQuality: [60, 95, 35, 100],
-      preDollarVol: [100000, 12000000, 30000, 50000000],
-      abovePrevHigh: [0, 1, 0, 1]
+    name: "REGIME_CHANGE",
+    features: {
+      price: { weight: 8, ideal: [1.00, 8.00], hard: [0.20, 12.00] },
+      drawdown90: { weight: 4, ideal: [-70, -5], hard: [-99, 20] },
+      baseTightness10: { weight: 6, ideal: [5, 35], hard: [0, 80] },
+      prevDayRet: { weight: 12, ideal: [15, 120], hard: [-5, 250] },
+      prevVolRatio: { weight: 12, ideal: [3, 30], hard: [0.5, 150] },
+      prevDollarShock: { weight: 14, ideal: [4, 40], hard: [0.5, 150] },
+      prevCloseStrength: { weight: 8, ideal: [65, 100], hard: [35, 100] },
+      breakout20: { weight: 6, ideal: [1, 1], hard: [0, 1] },
+      gapPct: { weight: 10, ideal: [10, 120], hard: [-10, 250] },
+      preVolRatio: { weight: 8, ideal: [1, 12], hard: [0.2, 40] },
+      holdQuality: { weight: 12, ideal: [60, 100], hard: [35, 100] }
     }
   }
 ];
 
-const ASSET_CACHE = {
-  expiresAt: 0,
-  data: null
-};
-
-const DISCOVERY_CACHE = {
-  expiresAt: 0,
-  key: "",
-  data: null
-};
+const ASSET_CACHE = { expiresAt: 0, data: null };
+const DISCOVERY_CACHE = { expiresAt: 0, key: "", data: null };
 
 function safeNum(v, fallback = 0) {
   if (v === null || v === undefined || v === "") return fallback;
@@ -205,18 +180,15 @@ function minOf(arr) {
 
 function chunkArray(arr, size) {
   const out = [];
-  for (let i = 0; i < arr.length; i += size) {
-    out.push(arr.slice(i, i + size));
-  }
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
 }
 
 function parseSymbols(raw) {
-  const src = String(raw || "")
+  return String(raw || "")
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter(Boolean);
-  return [...new Set(src)];
 }
 
 function getFlags(symbol) {
@@ -226,9 +198,15 @@ function getFlags(symbol) {
     recentDeficiency: false,
     catalystFresh: false,
     catalystType: "none",
-    allowAbove5: false,
+    allowAbove8: false,
+    marketCapOverride: null,
+    floatOverride: null,
     ...(SYMBOL_FLAGS[symbol] || {})
   };
+}
+
+function catalystGrade(type) {
+  return safeNum(CATALYST_GRADES[type], 0);
 }
 
 function timeZoneParts(date, timeZone = "America/New_York") {
@@ -332,7 +310,7 @@ function decisionRank(decision) {
   return 1;
 }
 
-async function alpacaGetJson(url, isTrading = false) {
+async function alpacaGetJson(url, isArray = false) {
   if (!ALPACA_API_KEY || !ALPACA_SECRET_KEY) {
     throw new Error("ALPACA_API_KEY / ALPACA_SECRET_KEY eksik");
   }
@@ -341,7 +319,7 @@ async function alpacaGetJson(url, isTrading = false) {
     headers: {
       "APCA-API-KEY-ID": ALPACA_API_KEY,
       "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
-      "Accept": "application/json"
+      Accept: "application/json"
     }
   });
 
@@ -350,14 +328,12 @@ async function alpacaGetJson(url, isTrading = false) {
     throw new Error(`Alpaca ${response.status}: ${text}`);
   }
 
-  if (!text) return isTrading ? [] : {};
+  if (!text) return isArray ? [] : {};
   return JSON.parse(text);
 }
 
 async function fetchAssets() {
-  if (ASSET_CACHE.data && Date.now() < ASSET_CACHE.expiresAt) {
-    return ASSET_CACHE.data;
-  }
+  if (ASSET_CACHE.data && Date.now() < ASSET_CACHE.expiresAt) return ASSET_CACHE.data;
 
   const url = new URL("/v2/assets", ALPACA_TRADING_BASE_URL);
   url.searchParams.set("status", "active");
@@ -396,7 +372,6 @@ async function fetchSnapshotsBatched(symbols, feed = ALPACA_FEED, batchSize = 80
   for (let i = 0; i < chunks.length; i += concurrency) {
     const group = chunks.slice(i, i + concurrency);
     const responses = await Promise.all(group.map((c) => fetchSnapshotsBatch(c, feed)));
-
     for (const resp of responses) {
       for (const [symbol, snap] of Object.entries(resp || {})) {
         result[symbol] = snap;
@@ -518,7 +493,6 @@ function computeRangePct(high, low, ref) {
 function buildDailyHistoryContext(dailyBars, tradeDate) {
   const sorted = [...(dailyBars || [])].sort((a, b) => new Date(a.t) - new Date(b.t));
   const priorBars = sorted.filter((b) => isoDateNY(b.t) < tradeDate);
-
   if (priorBars.length < 25) return null;
 
   const last = priorBars[priorBars.length - 1];
@@ -527,9 +501,10 @@ function buildDailyHistoryContext(dailyBars, tradeDate) {
   const hist20 = priorBars.slice(-20);
   const hist60 = priorBars.slice(-60);
   const hist90 = priorBars.slice(-90);
+  const hist252 = priorBars.slice(-252);
   const priorDates = [...new Set(priorBars.map((b) => isoDateNY(b.t)))].slice(-10);
 
-  return { last, prev, hist10, hist20, hist60, hist90, priorDates };
+  return { last, prev, hist10, hist20, hist60, hist90, hist252, priorDates };
 }
 
 function buildStructuralMetrics(ctx, flags) {
@@ -554,7 +529,9 @@ function buildStructuralMetrics(ctx, flags) {
     recentReverseSplit: !!flags.recentReverseSplit,
     otcRisk: !!flags.otcRisk,
     recentDeficiency: !!flags.recentDeficiency,
-    allowAbove5: !!flags.allowAbove5
+    allowAbove8: !!flags.allowAbove8,
+    marketCap: flags.marketCapOverride,
+    floatShares: flags.floatOverride
   };
 }
 
@@ -567,7 +544,13 @@ function buildIgnitionMetrics(ctx, flags) {
   const avgVol20 = Math.max(avg(ctx.hist20.slice(0, -1).map((b) => safeNum(b.v, 0))), 1);
   const prevVol = safeNum(ctx.last.v, 0);
   const prevVolRatio = prevVol / avgVol20;
+
   const prevDollarVol = prevVol * price;
+  const avgDollarVol20 = Math.max(
+    avg(ctx.hist20.slice(0, -1).map((b) => safeNum(b.v, 0) * safeNum(b.c, 0))),
+    1
+  );
+  const prevDollarShock = prevDollarVol / avgDollarVol20;
 
   const avgRange20 = Math.max(
     avg(ctx.hist20.slice(0, -1).map((b) => computeRangePct(b.h, b.l, b.c) || 0)),
@@ -582,10 +565,123 @@ function buildIgnitionMetrics(ctx, flags) {
     prevCloseStrength,
     prevVolRatio,
     prevDollarVol,
+    prevDollarShock,
     prevRangePct,
     rangeExpansion,
     catalystFresh: !!flags.catalystFresh,
-    catalystType: flags.catalystType || "none"
+    catalystType: flags.catalystType || "none",
+    catalystGrade: catalystGrade(flags.catalystType || "none")
+  };
+}
+
+function buildFormerRunnerMetrics(ctx) {
+  const hist = ctx.hist252 || [];
+  if (!hist.length) {
+    return {
+      explosiveDays252: 0,
+      explosiveDays63: 0,
+      haltProxyDays252: 0,
+      haltProxyDays63: 0,
+      maxExpansion252: 0,
+      maxVolShock252: 0,
+      formerRunnerFlag: false
+    };
+  }
+
+  const volSma20Arr = [];
+  for (let i = 0; i < hist.length; i++) {
+    const start = Math.max(0, i - 20);
+    const sample = hist.slice(start, i).map((b) => safeNum(b.v, 0));
+    volSma20Arr.push(sample.length ? avg(sample) : 0);
+  }
+
+  let explosiveDays252 = 0;
+  let explosiveDays63 = 0;
+  let haltProxyDays252 = 0;
+  let haltProxyDays63 = 0;
+  let maxExpansion252 = 0;
+  let maxVolShock252 = 0;
+
+  hist.forEach((b, i) => {
+    const open = safeNum(b.o, 0);
+    const high = safeNum(b.h, 0);
+    const close = safeNum(b.c, 0);
+    const vol = safeNum(b.v, 0);
+    const volSma20 = Math.max(safeNum(volSma20Arr[i], 0), 1);
+    const expFromOpen = open > 0 ? ((high / open) - 1) * 100 : 0;
+    const closeFromOpen = open > 0 ? ((close / open) - 1) * 100 : 0;
+    const volShock = vol / volSma20;
+    const closeStrength = computeCloseStrength(b) || 0;
+
+    maxExpansion252 = Math.max(maxExpansion252, expFromOpen);
+    maxVolShock252 = Math.max(maxVolShock252, volShock);
+
+    const explosive =
+      expFromOpen >= 60 &&
+      volShock >= 8 &&
+      closeStrength >= 55;
+
+    const haltProxy =
+      expFromOpen >= 70 &&
+      volShock >= 10 &&
+      closeFromOpen >= 25;
+
+    if (explosive) {
+      explosiveDays252 += 1;
+      if (i >= hist.length - 63) explosiveDays63 += 1;
+    }
+
+    if (haltProxy) {
+      haltProxyDays252 += 1;
+      if (i >= hist.length - 63) haltProxyDays63 += 1;
+    }
+  });
+
+  return {
+    explosiveDays252,
+    explosiveDays63,
+    haltProxyDays252,
+    haltProxyDays63,
+    maxExpansion252,
+    maxVolShock252,
+    formerRunnerFlag: explosiveDays252 >= 1 || haltProxyDays252 >= 1
+  };
+}
+
+function buildRotationMetrics(structuralMetrics, ignitionMetrics, preMetrics) {
+  const price = safeNum(structuralMetrics.price, 0);
+  const marketCap = safeNum(structuralMetrics.marketCap, 0);
+  const explicitFloat = safeNum(structuralMetrics.floatShares, 0);
+
+  let floatBase = explicitFloat;
+  let usingProxyFloat = false;
+
+  if (!floatBase && marketCap > 0 && price > 0) {
+    floatBase = marketCap / price;
+    usingProxyFloat = true;
+  }
+
+  const prevTurnover =
+    floatBase > 0
+      ? safeNum(ignitionMetrics.prevDollarVol, 0) /
+        Math.max(marketCap || (floatBase * price), 1)
+      : 0;
+
+  const preTurnover =
+    floatBase > 0
+      ? safeNum(preMetrics.preDollarVol, 0) /
+        Math.max(marketCap || (floatBase * safeNum(preMetrics.price, price)), 1)
+      : 0;
+
+  const volumeFloatRotation =
+    floatBase > 0 ? safeNum(ignitionMetrics.prevVolRatio, 0) * 0.25 : 0;
+
+  return {
+    floatBase,
+    usingProxyFloat,
+    prevTurnover,
+    preTurnover,
+    volumeFloatRotation
   };
 }
 
@@ -633,7 +729,8 @@ function buildPremarketMetrics(minuteBars, tradeDate, cutoffTime, prevClose, pre
   const preLow = minOf(preBars.map((b) => safeNum(b.l, 0)));
   const preVol = preBars.reduce((s, b) => s + safeNum(b.v, 0), 0);
   const preVWAP = computeVWAP(preBars);
-  const holdQuality = preHigh > preLow ? ((preLast - preLow) / (preHigh - preLow)) * 100 : 50;
+  const holdQuality =
+    preHigh > preLow ? ((preLast - preLow) / (preHigh - preLow)) * 100 : 50;
   const preRangePct = computeRangePct(preHigh, preLow, preLast);
   const gapPct = prevClose > 0 ? ((preLast - prevClose) / prevClose) * 100 : null;
   const preDollarVol = preLast != null ? preLast * preVol : 0;
@@ -669,39 +766,52 @@ function scoreStructural(m, flags) {
     return { score: 0, notes, hardReject: true };
   }
 
-  if (m.price > 5 && !flags.allowAbove5) {
-    notes.push("5 dolar üstü");
+  if (m.price > 8 && !flags.allowAbove8) {
+    notes.push("8 dolar üstü");
     return { score: 0, notes, hardReject: true };
   }
 
-  if (m.price >= 0.10 && m.price <= 1) score += 24;
-  else if (m.price > 1 && m.price <= 3) score += 20;
+  if (m.price >= 0.10 && m.price <= 1) score += 22;
+  else if (m.price > 1 && m.price <= 3) score += 18;
   else if (m.price > 3 && m.price <= 5) score += 12;
+  else if (m.price > 5 && m.price <= 8) score += 6;
 
-  if (m.drawdown90 >= -90 && m.drawdown90 <= -35) score += 18;
-  else if (m.drawdown90 > -35 && m.drawdown90 <= -10) score += 8;
-  else if (m.drawdown90 < -95) score -= 8;
+  if (m.marketCap != null && m.marketCap > 0) {
+    if (m.marketCap >= 10000000 && m.marketCap <= 120000000) score += 12;
+    else if (m.marketCap > 120000000 && m.marketCap <= 300000000) score += 6;
+    else if (m.marketCap > 600000000) {
+      score -= 8;
+      notes.push("Market cap büyük");
+    }
+  }
 
-  if (m.baseTightness10 >= 4 && m.baseTightness10 <= 28) score += 16;
-  else if (m.baseTightness10 > 28 && m.baseTightness10 <= 50) score += 8;
+  if (m.drawdown90 >= -90 && m.drawdown90 <= -30) score += 14;
+  else if (m.drawdown90 > -30 && m.drawdown90 <= -5) score += 6;
+  else if (m.drawdown90 < -95) {
+    score -= 6;
+    notes.push("Aşırı çökmüş");
+  }
+
+  if (m.baseTightness10 >= 3 && m.baseTightness10 <= 28) score += 16;
+  else if (m.baseTightness10 > 28 && m.baseTightness10 <= 45) score += 8;
   else if (m.baseTightness10 > 70) {
     score -= 8;
     notes.push("Base gevşek");
   }
 
-  if (m.reboundFrom30Low >= 5 && m.reboundFrom30Low <= 120) score += 10;
-  else if (m.reboundFrom30Low > 200) {
+  if (m.reboundFrom30Low >= 5 && m.reboundFrom30Low <= 140) score += 8;
+  else if (m.reboundFrom30Low > 220) {
     score -= 5;
-    notes.push("Zaten çok şişmiş rebound");
+    notes.push("Rebound fazla uzamış");
   }
 
   if (m.breakout20) {
-    score += 12;
+    score += 10;
     notes.push("20g high reclaim");
   }
 
   if (flags.recentReverseSplit) {
-    score -= 28;
+    score -= 24;
     notes.push("Yakın reverse split");
   }
 
@@ -718,41 +828,123 @@ function scoreIgnition(m) {
   let score = 0;
   const notes = [];
 
-  if (m.prevDayRet >= 4 && m.prevDayRet < 15) score += 16;
-  else if (m.prevDayRet >= 15 && m.prevDayRet < 45) score += 22;
-  else if (m.prevDayRet >= 45 && m.prevDayRet < 100) score += 14;
-  else if (m.prevDayRet < 0) score -= 12;
+  if (m.prevDayRet >= 4 && m.prevDayRet < 15) score += 14;
+  else if (m.prevDayRet >= 15 && m.prevDayRet < 45) score += 20;
+  else if (m.prevDayRet >= 45 && m.prevDayRet < 120) score += 16;
+  else if (m.prevDayRet >= 120) {
+    score += 8;
+    notes.push("Aşırı sıcak ilk gün");
+  } else if (m.prevDayRet < 0) {
+    score -= 12;
+  }
 
-  if (m.prevVolRatio >= 1.5 && m.prevVolRatio < 3) score += 12;
-  else if (m.prevVolRatio >= 3 && m.prevVolRatio < 8) score += 20;
-  else if (m.prevVolRatio >= 8) {
-    score += 24;
+  if (m.prevVolRatio >= 1.5 && m.prevVolRatio < 3) score += 10;
+  else if (m.prevVolRatio >= 3 && m.prevVolRatio < 10) score += 18;
+  else if (m.prevVolRatio >= 10) {
+    score += 22;
     notes.push("Vol shock");
   } else if (m.prevVolRatio < 0.8) {
     score -= 8;
   }
 
-  if (m.prevCloseStrength >= 80) score += 18;
+  if (m.prevDollarShock >= 1.5 && m.prevDollarShock < 4) score += 10;
+  else if (m.prevDollarShock >= 4 && m.prevDollarShock < 15) score += 18;
+  else if (m.prevDollarShock >= 15) {
+    score += 22;
+    notes.push("Dollar shock");
+  } else if (m.prevDollarShock < 0.8) {
+    score -= 8;
+  }
+
+  if (m.prevCloseStrength >= 80) score += 16;
   else if (m.prevCloseStrength >= 65) score += 10;
   else if (m.prevCloseStrength < 45) {
     score -= 10;
     notes.push("Weak close");
   }
 
-  if (m.prevDollarVol >= 150000 && m.prevDollarVol < 600000) score += 10;
-  else if (m.prevDollarVol >= 600000 && m.prevDollarVol < 3000000) score += 16;
-  else if (m.prevDollarVol >= 3000000) score += 20;
-  else if (m.prevDollarVol < 50000) {
+  if (m.prevDollarVol >= 150000 && m.prevDollarVol < 600000) score += 8;
+  else if (m.prevDollarVol >= 600000 && m.prevDollarVol < 3000000) score += 14;
+  else if (m.prevDollarVol >= 3000000 && m.prevDollarVol < 30000000) score += 18;
+  else if (m.prevDollarVol >= 30000000) {
+    score += 8;
+    notes.push("Çok kalabalık tape");
+  } else if (m.prevDollarVol < 50000) {
     score -= 10;
     notes.push("Dollar vol zayıf");
   }
 
   if (m.rangeExpansion >= 1.3 && m.rangeExpansion < 2.5) score += 8;
-  else if (m.rangeExpansion >= 2.5) score += 14;
+  else if (m.rangeExpansion >= 2.5) score += 12;
 
-  if (m.catalystFresh) {
-    score += 12;
+  if (m.catalystFresh && m.catalystGrade > 0) {
+    score += Math.min(m.catalystGrade, 24);
     notes.push(`Fresh catalyst: ${m.catalystType}`);
+  } else if (m.catalystGrade < 0) {
+    score += m.catalystGrade;
+    notes.push(`Negative catalyst: ${m.catalystType}`);
+  }
+
+  score = clamp(Math.round(score), 0, 100);
+  return { score, notes };
+}
+
+function scoreFormerRunner(m) {
+  let score = 0;
+  const notes = [];
+
+  if (m.explosiveDays252 >= 1) {
+    score += 18;
+    notes.push("Former runner");
+  }
+  if (m.explosiveDays252 >= 2) score += 8;
+
+  if (m.explosiveDays63 >= 1) {
+    score += 18;
+    notes.push("Recent explosive history");
+  }
+  if (m.haltProxyDays252 >= 1) {
+    score += 14;
+    notes.push("Halt proxy history");
+  }
+  if (m.haltProxyDays63 >= 1) score += 12;
+
+  if (m.maxExpansion252 >= 80 && m.maxExpansion252 < 150) score += 8;
+  else if (m.maxExpansion252 >= 150) score += 12;
+
+  if (m.maxVolShock252 >= 8 && m.maxVolShock252 < 20) score += 8;
+  else if (m.maxVolShock252 >= 20) score += 12;
+
+  score = clamp(Math.round(score), 0, 100);
+  return { score, notes };
+}
+
+function scoreRotation(m, source) {
+  let score = 0;
+  const notes = [];
+
+  if (m.floatBase > 0) {
+    if (m.usingProxyFloat) notes.push("Proxy float");
+    else notes.push("Known float");
+
+    if (m.prevTurnover >= 0.2 && m.prevTurnover < 0.5) score += 10;
+    else if (m.prevTurnover >= 0.5 && m.prevTurnover < 1.0) score += 18;
+    else if (m.prevTurnover >= 1.0) {
+      score += 24;
+      notes.push("Prev turnover strong");
+    }
+
+    if (source === "REAL_PREMARKET") {
+      if (m.preTurnover >= 0.05 && m.preTurnover < 0.15) score += 10;
+      else if (m.preTurnover >= 0.15 && m.preTurnover < 0.35) score += 18;
+      else if (m.preTurnover >= 0.35) {
+        score += 24;
+        notes.push("Premarket turnover strong");
+      }
+    }
+
+    if (m.volumeFloatRotation >= 1 && m.volumeFloatRotation < 2.5) score += 8;
+    else if (m.volumeFloatRotation >= 2.5) score += 12;
   }
 
   score = clamp(Math.round(score), 0, 100);
@@ -768,30 +960,30 @@ function scorePremarket(m, feed) {
     return { score: 0, notes, hardReject: false };
   }
 
-  if (feed === "sip") score += 4;
+  if (feed === "sip") score += 3;
   else notes.push("IEX feed");
 
-  if (m.gapPct >= 3 && m.gapPct < 15) score += 12;
-  else if (m.gapPct >= 15 && m.gapPct < 50) score += 20;
-  else if (m.gapPct >= 50 && m.gapPct < 150) {
-    score += 12;
+  if (m.gapPct >= 3 && m.gapPct < 15) score += 10;
+  else if (m.gapPct >= 15 && m.gapPct < 60) score += 18;
+  else if (m.gapPct >= 60 && m.gapPct < 180) {
+    score += 10;
     notes.push("Aşırı sıcak gap");
   } else if (m.gapPct < 0) {
     score -= 10;
   }
 
   if (m.preVolRatio >= 0.8 && m.preVolRatio < 2) score += 10;
-  else if (m.preVolRatio >= 2 && m.preVolRatio < 6) score += 20;
-  else if (m.preVolRatio >= 6) {
-    score += 24;
+  else if (m.preVolRatio >= 2 && m.preVolRatio < 8) score += 18;
+  else if (m.preVolRatio >= 8) {
+    score += 22;
     notes.push("Premarket vol shock");
   } else if (m.preVolRatio < 0.4) {
     score -= 8;
   }
 
-  if (m.preDollarVol >= 150000 && m.preDollarVol < 500000) score += 12;
-  else if (m.preDollarVol >= 500000 && m.preDollarVol < 2000000) score += 18;
-  else if (m.preDollarVol >= 2000000) score += 22;
+  if (m.preDollarVol >= 150000 && m.preDollarVol < 600000) score += 10;
+  else if (m.preDollarVol >= 600000 && m.preDollarVol < 3000000) score += 16;
+  else if (m.preDollarVol >= 3000000) score += 20;
   else if (m.preDollarVol < 75000) {
     score -= 12;
     notes.push("Premarket dollar vol zayıf");
@@ -811,11 +1003,11 @@ function scorePremarket(m, feed) {
   }
 
   if (m.abovePrevHigh) {
-    score += 10;
+    score += 8;
     notes.push("Prev high reclaim");
   }
 
-  if (m.preRangePct != null && m.preRangePct > 60) {
+  if (m.preRangePct != null && m.preRangePct > 65) {
     score -= 8;
     notes.push("Premarket range çok geniş");
   }
@@ -827,7 +1019,7 @@ function scorePremarket(m, feed) {
     m.holdQuality >= 80 &&
     m.abovePreVWAP
   ) {
-    score += 8;
+    score += 6;
     notes.push("IEX tolerance");
   }
 
@@ -847,9 +1039,7 @@ function bandSimilarity(value, idealLow, idealHigh, hardLow, hardHigh) {
   if (value >= idealLow && value <= idealHigh) return 1;
   if (value < hardLow || value > hardHigh) return 0;
 
-  if (value < idealLow) {
-    return (value - hardLow) / (idealLow - hardLow);
-  }
+  if (value < idealLow) return (value - hardLow) / (idealLow - hardLow);
   return (hardHigh - value) / (hardHigh - idealHigh);
 }
 
@@ -857,15 +1047,12 @@ function boolSimilarity(value, idealLow, idealHigh, hardLow, hardHigh) {
   return bandSimilarity(value ? 1 : 0, idealLow, idealHigh, hardLow, hardHigh);
 }
 
-function computePatternSimilarity(featureSet) {
-  const results = ROCKET_PROTOTYPES.map((proto) => {
+function computeFamilyFits(featureSet) {
+  const fits = FAMILY_MODELS.map((family) => {
     let weighted = 0;
     let totalWeight = 0;
 
-    for (const [key, weight] of Object.entries(proto.weights)) {
-      const band = proto.bands[key];
-      if (!band) continue;
-
+    for (const [key, cfg] of Object.entries(family.features)) {
       const val = featureSet[key];
       const hasValue =
         typeof val === "boolean" ||
@@ -874,25 +1061,23 @@ function computePatternSimilarity(featureSet) {
       if (!hasValue) continue;
 
       const sim = typeof val === "boolean"
-        ? boolSimilarity(val, band[0], band[1], band[2], band[3])
-        : bandSimilarity(val, band[0], band[1], band[2], band[3]);
+        ? boolSimilarity(val, cfg.ideal[0], cfg.ideal[1], cfg.hard[0], cfg.hard[1])
+        : bandSimilarity(val, cfg.ideal[0], cfg.ideal[1], cfg.hard[0], cfg.hard[1]);
 
-      weighted += sim * weight;
-      totalWeight += weight;
+      weighted += sim * cfg.weight;
+      totalWeight += cfg.weight;
     }
 
-    const score = totalWeight > 0 ? (weighted / totalWeight) * 100 : 0;
-
     return {
-      name: proto.name,
-      score: Math.round(score)
+      name: family.name,
+      score: totalWeight > 0 ? Math.round((weighted / totalWeight) * 100) : 0
     };
   }).sort((a, b) => b.score - a.score);
 
   return {
-    bestName: results[0]?.name || null,
-    bestScore: results[0]?.score || 0,
-    topMatches: results.slice(0, 3)
+    bestFamily: fits[0]?.name || null,
+    familyScore: fits[0]?.score || 0,
+    topFamilies: fits.slice(0, 3)
   };
 }
 
@@ -941,56 +1126,92 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
     entryType,
     entryIdea: roundSmart(entryIdea),
     stop: roundSmart(entryIdea * 0.88),
-    tp1: roundSmart(entryIdea * 1.15),
-    tp2: roundSmart(entryIdea * 1.30)
+    tp1: roundSmart(entryIdea * 1.20),
+    tp2: roundSmart(entryIdea * 1.50)
   };
 }
 
-function finalNightlyDecision({ structuralScore, ignitionScore, patternScore }) {
-  const composite = 0.35 * structuralScore + 0.35 * ignitionScore + 0.30 * patternScore;
-  if (composite >= 70 && structuralScore >= 40 && ignitionScore >= 50 && patternScore >= 58) {
+function computeSupernovaScoreNightly(structuralScore, ignitionScore, formerRunnerScore, rotationScore, familyScore) {
+  return roundSmart(
+    0.20 * structuralScore +
+    0.25 * ignitionScore +
+    0.25 * formerRunnerScore +
+    0.15 * rotationScore +
+    0.15 * familyScore
+  );
+}
+
+function computeSupernovaScoreLive(structuralScore, ignitionScore, formerRunnerScore, rotationScore, premarketScore, familyScore) {
+  return roundSmart(
+    0.15 * structuralScore +
+    0.20 * ignitionScore +
+    0.20 * formerRunnerScore +
+    0.15 * rotationScore +
+    0.15 * premarketScore +
+    0.15 * familyScore
+  );
+}
+
+function finalNightlyDecision({ structuralScore, ignitionScore, formerRunnerScore, familyScore, supernovaScore }) {
+  if (
+    structuralScore >= 36 &&
+    ignitionScore >= 48 &&
+    formerRunnerScore >= 20 &&
+    familyScore >= 58 &&
+    supernovaScore >= 60
+  ) {
     return "İZLE";
   }
   return "ALMA";
 }
 
-function finalLiveDecision({ structuralScore, ignitionScore, premarketScore, patternScore, source }) {
-  const composite =
-    0.25 * structuralScore +
-    0.25 * ignitionScore +
-    0.25 * premarketScore +
-    0.25 * patternScore;
-
+function finalLiveDecision({
+  structuralScore,
+  ignitionScore,
+  formerRunnerScore,
+  rotationScore,
+  premarketScore,
+  familyScore,
+  supernovaScore,
+  source
+}) {
   if (source !== "REAL_PREMARKET") {
-    if (0.4 * structuralScore + 0.3 * ignitionScore + 0.3 * patternScore >= 70 && patternScore >= 58) {
-      return "İZLE";
-    }
+    if (
+      structuralScore >= 36 &&
+      ignitionScore >= 48 &&
+      formerRunnerScore >= 20 &&
+      familyScore >= 58 &&
+      supernovaScore >= 60
+    ) return "İZLE";
     return "ALMA";
   }
 
   if (
-    structuralScore >= 50 &&
-    ignitionScore >= 60 &&
-    premarketScore >= 72 &&
-    patternScore >= 72 &&
-    composite >= 72
-  ) {
-    return "GÜÇLÜ AL";
-  }
+    structuralScore >= 42 &&
+    ignitionScore >= 54 &&
+    formerRunnerScore >= 25 &&
+    rotationScore >= 10 &&
+    premarketScore >= 64 &&
+    familyScore >= 64 &&
+    supernovaScore >= 68
+  ) return "GÜÇLÜ AL";
 
   if (
-    structuralScore >= 40 &&
-    ignitionScore >= 50 &&
-    premarketScore >= 58 &&
-    patternScore >= 60 &&
-    composite >= 60
-  ) {
-    return "AL";
-  }
+    structuralScore >= 36 &&
+    ignitionScore >= 46 &&
+    formerRunnerScore >= 18 &&
+    premarketScore >= 52 &&
+    familyScore >= 56 &&
+    supernovaScore >= 58
+  ) return "AL";
 
-  if (0.4 * structuralScore + 0.3 * ignitionScore + 0.3 * patternScore >= 70 && patternScore >= 58) {
-    return "İZLE";
-  }
+  if (
+    structuralScore >= 36 &&
+    ignitionScore >= 48 &&
+    formerRunnerScore >= 20 &&
+    familyScore >= 58 &&
+    supernovaScore >= 60
+  ) return "İZLE";
 
   return "ALMA";
 }
@@ -1002,101 +1223,75 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
 
   const structuralMetrics = buildStructuralMetrics(ctx, flags);
   const ignitionMetrics = buildIgnitionMetrics(ctx, flags);
+  const formerRunnerMetrics = buildFormerRunnerMetrics(ctx);
 
   const structural = scoreStructural(structuralMetrics, flags);
-  if (structural.hardReject) {
-    return {
-      symbol,
-      decision: "ALMA",
-      structuralScore: structural.score,
-      ignitionScore: 0,
-      premarketScore: 0,
-      patternScore: 0,
-      bestPattern: null,
-      topMatches: "",
-      source: "NONE",
-      price: null,
-      prevClose: roundSmart(ctx.last.c),
-      prevHigh: roundSmart(ctx.last.h),
-      gapPct: null,
-      preVol: 0,
-      preVolBaselineMedian: 0,
-      preVolRatio: 0,
-      preDollarVol: 0,
-      preVWAP: null,
-      abovePreVWAP: false,
-      holdQuality: null,
-      preRangePct: null,
-      abovePrevHigh: false,
-      drawdown90: roundSmart(structuralMetrics.drawdown90),
-      reboundFrom30Low: roundSmart(structuralMetrics.reboundFrom30Low),
-      baseTightness10: roundSmart(structuralMetrics.baseTightness10),
-      breakout20: structuralMetrics.breakout20 ? "YES" : "NO",
-      prevDayRet: roundSmart(ignitionMetrics.prevDayRet),
-      prevCloseStrength: roundSmart(ignitionMetrics.prevCloseStrength),
-      prevVolRatio: roundSmart(ignitionMetrics.prevVolRatio),
-      prevDollarVol: Math.round(ignitionMetrics.prevDollarVol || 0),
-      rangeExpansion: roundSmart(ignitionMetrics.rangeExpansion),
-      entryType: "NO_TRADE",
-      entryIdea: null,
-      stop: null,
-      tp1: null,
-      tp2: null,
-      notes: structural.notes.join(" | ")
-    };
-  }
-
   const ignition = scoreIgnition(ignitionMetrics);
+  const formerRunner = scoreFormerRunner(formerRunnerMetrics);
 
-  const featureSet = {
+  const dummyPre = {
+    source: "NONE",
+    price: null,
+    preDollarVol: 0
+  };
+
+  const rotationMetrics = buildRotationMetrics(structuralMetrics, ignitionMetrics, dummyPre);
+  const rotation = scoreRotation(rotationMetrics, "NONE");
+
+  const family = computeFamilyFits({
     price: structuralMetrics.price,
     drawdown90: structuralMetrics.drawdown90,
     baseTightness10: structuralMetrics.baseTightness10,
     prevDayRet: ignitionMetrics.prevDayRet,
     prevVolRatio: ignitionMetrics.prevVolRatio,
+    prevDollarShock: ignitionMetrics.prevDollarShock,
     prevCloseStrength: ignitionMetrics.prevCloseStrength,
     breakout20: !!structuralMetrics.breakout20
-  };
-
-  const pattern = computePatternSimilarity(featureSet);
-
-  const decision = finalNightlyDecision({
-    structuralScore: structural.score,
-    ignitionScore: ignition.score,
-    patternScore: pattern.bestScore
   });
 
-  const plan = buildEntryPlan(
-    decision,
-    "NONE",
-    null,
-    null,
-    safeNum(ctx.last.h, 0)
+  const supernovaScore = computeSupernovaScoreNightly(
+    structural.score,
+    ignition.score,
+    formerRunner.score,
+    rotation.score,
+    family.familyScore
   );
+
+  const decision = structural.hardReject
+    ? "ALMA"
+    : finalNightlyDecision({
+        structuralScore: structural.score,
+        ignitionScore: ignition.score,
+        formerRunnerScore: formerRunner.score,
+        familyScore: family.familyScore,
+        supernovaScore
+      });
+
+  const plan = buildEntryPlan(decision, "NONE", null, null, safeNum(ctx.last.h, 0));
 
   return {
     symbol,
     decision,
-
+    supernovaScore,
     structuralScore: structural.score,
     ignitionScore: ignition.score,
+    formerRunnerScore: formerRunner.score,
+    rotationScore: rotation.score,
     premarketScore: 0,
-    patternScore: pattern.bestScore,
-    bestPattern: pattern.bestName,
-    topMatches: pattern.topMatches.map((x) => `${x.name}:${x.score}`).join(" | "),
+    familyScore: family.familyScore,
+    bestFamily: family.bestFamily,
+    familyMatches: family.topFamilies.map((x) => `${x.name}:${x.score}`).join(" | "),
 
     source: "NONE",
-
     price: null,
     prevClose: roundSmart(ctx.last.c),
     prevHigh: roundSmart(ctx.last.h),
-    gapPct: null,
 
+    gapPct: null,
     preVol: 0,
     preVolBaselineMedian: 0,
     preVolRatio: 0,
     preDollarVol: 0,
-
     preVWAP: null,
     abovePreVWAP: false,
     holdQuality: null,
@@ -1112,7 +1307,17 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     prevCloseStrength: roundSmart(ignitionMetrics.prevCloseStrength),
     prevVolRatio: roundSmart(ignitionMetrics.prevVolRatio),
     prevDollarVol: Math.round(ignitionMetrics.prevDollarVol || 0),
+    prevDollarShock: roundSmart(ignitionMetrics.prevDollarShock),
     rangeExpansion: roundSmart(ignitionMetrics.rangeExpansion),
+
+    explosiveDays252: formerRunnerMetrics.explosiveDays252,
+    explosiveDays63: formerRunnerMetrics.explosiveDays63,
+    haltProxyDays252: formerRunnerMetrics.haltProxyDays252,
+    haltProxyDays63: formerRunnerMetrics.haltProxyDays63,
+    maxExpansion252: roundSmart(formerRunnerMetrics.maxExpansion252),
+
+    prevTurnover: roundSmart(rotationMetrics.prevTurnover),
+    preTurnover: roundSmart(rotationMetrics.preTurnover),
 
     entryType: plan.entryType,
     entryIdea: plan.entryIdea,
@@ -1120,7 +1325,12 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     tp1: plan.tp1,
     tp2: plan.tp2,
 
-    notes: [...structural.notes, ...ignition.notes].join(" | ")
+    notes: [
+      ...structural.notes,
+      ...ignition.notes,
+      ...formerRunner.notes,
+      ...rotation.notes
+    ].join(" | ")
   };
 }
 
@@ -1131,9 +1341,11 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
 
   const structuralMetrics = buildStructuralMetrics(ctx, flags);
   const ignitionMetrics = buildIgnitionMetrics(ctx, flags);
+  const formerRunnerMetrics = buildFormerRunnerMetrics(ctx);
 
   const structural = scoreStructural(structuralMetrics, flags);
   const ignition = scoreIgnition(ignitionMetrics);
+  const formerRunner = scoreFormerRunner(formerRunnerMetrics);
 
   const baseline = computeSameTimePremarketBaseline(minuteBars, ctx.priorDates, cutoffTime);
   const pre = buildPremarketMetrics(
@@ -1149,62 +1361,66 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
       ? pre.preVol / baseline.baselineMedian
       : 0;
 
-  const preMetrics = {
-    ...pre,
-    preVolRatio
-  };
-
+  const preMetrics = { ...pre, preVolRatio };
   const premarket = scorePremarket(preMetrics, ALPACA_FEED);
 
-  const featureSet = {
+  const rotationMetrics = buildRotationMetrics(structuralMetrics, ignitionMetrics, preMetrics);
+  const rotation = scoreRotation(rotationMetrics, pre.source);
+
+  const family = computeFamilyFits({
     price: structuralMetrics.price,
     drawdown90: structuralMetrics.drawdown90,
     baseTightness10: structuralMetrics.baseTightness10,
     prevDayRet: ignitionMetrics.prevDayRet,
     prevVolRatio: ignitionMetrics.prevVolRatio,
+    prevDollarShock: ignitionMetrics.prevDollarShock,
     prevCloseStrength: ignitionMetrics.prevCloseStrength,
     breakout20: !!structuralMetrics.breakout20,
     gapPct: preMetrics.gapPct,
     preVolRatio: preMetrics.preVolRatio,
     holdQuality: preMetrics.holdQuality,
-    preDollarVol: preMetrics.preDollarVol,
     abovePrevHigh: !!preMetrics.abovePrevHigh
-  };
+  });
 
-  const pattern = computePatternSimilarity(featureSet);
+  const supernovaScore = computeSupernovaScoreLive(
+    structural.score,
+    ignition.score,
+    formerRunner.score,
+    rotation.score,
+    premarket.score,
+    family.familyScore
+  );
 
   let decision = "ALMA";
   if (!structural.hardReject && !premarket.hardReject) {
     decision = finalLiveDecision({
       structuralScore: structural.score,
       ignitionScore: ignition.score,
+      formerRunnerScore: formerRunner.score,
+      rotationScore: rotation.score,
       premarketScore: premarket.score,
-      patternScore: pattern.bestScore,
+      familyScore: family.familyScore,
+      supernovaScore,
       source: pre.source
     });
   }
 
-  const plan = buildEntryPlan(
-    decision,
-    pre.source,
-    pre.price,
-    pre.preVWAP,
-    safeNum(ctx.last.h, 0)
-  );
+  const plan = buildEntryPlan(decision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
 
   return {
     symbol,
     decision,
-
+    supernovaScore,
     structuralScore: structural.score,
     ignitionScore: ignition.score,
+    formerRunnerScore: formerRunner.score,
+    rotationScore: rotation.score,
     premarketScore: premarket.score,
-    patternScore: pattern.bestScore,
-    bestPattern: pattern.bestName,
-    topMatches: pattern.topMatches.map((x) => `${x.name}:${x.score}`).join(" | "),
+    familyScore: family.familyScore,
+    bestFamily: family.bestFamily,
+    familyMatches: family.topFamilies.map((x) => `${x.name}:${x.score}`).join(" | "),
 
     source: pre.source,
-
     price: roundSmart(pre.price),
     prevClose: roundSmart(ctx.last.c),
     prevHigh: roundSmart(ctx.last.h),
@@ -1214,7 +1430,6 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     preVolBaselineMedian: Math.round(baseline.baselineMedian || 0),
     preVolRatio: roundSmart(preVolRatio),
     preDollarVol: Math.round(pre.preDollarVol || 0),
-
     preVWAP: roundSmart(pre.preVWAP),
     abovePreVWAP: !!pre.abovePreVWAP,
     holdQuality: roundSmart(pre.holdQuality),
@@ -1230,7 +1445,17 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     prevCloseStrength: roundSmart(ignitionMetrics.prevCloseStrength),
     prevVolRatio: roundSmart(ignitionMetrics.prevVolRatio),
     prevDollarVol: Math.round(ignitionMetrics.prevDollarVol || 0),
+    prevDollarShock: roundSmart(ignitionMetrics.prevDollarShock),
     rangeExpansion: roundSmart(ignitionMetrics.rangeExpansion),
+
+    explosiveDays252: formerRunnerMetrics.explosiveDays252,
+    explosiveDays63: formerRunnerMetrics.explosiveDays63,
+    haltProxyDays252: formerRunnerMetrics.haltProxyDays252,
+    haltProxyDays63: formerRunnerMetrics.haltProxyDays63,
+    maxExpansion252: roundSmart(formerRunnerMetrics.maxExpansion252),
+
+    prevTurnover: roundSmart(rotationMetrics.prevTurnover),
+    preTurnover: roundSmart(rotationMetrics.preTurnover),
 
     entryType: plan.entryType,
     entryIdea: plan.entryIdea,
@@ -1241,6 +1466,8 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     notes: [
       ...structural.notes,
       ...ignition.notes,
+      ...formerRunner.notes,
+      ...rotation.notes,
       ...premarket.notes
     ].join(" | ")
   };
@@ -1316,28 +1543,30 @@ function scoreQuickDiscovery(asset, snap) {
   const dollarVol = price != null ? price * dayVol : 0;
   const dayRet = prevClose && price ? ((price - prevClose) / prevClose) * 100 : 0;
 
-  if (price == null || price < 0.10 || price > 5.00) return null;
-  if (dayVol < 25000) return null;
-  if (dollarVol < 50000) return null;
+  if (price == null || price < 0.10 || price > 8.00) return null;
+  if (dayVol < 50000) return null;
+  if (dollarVol < 100000) return null;
 
   let score = 0;
 
   if (price >= 0.10 && price <= 1) score += 18;
-  else if (price <= 3) score += 14;
-  else score += 8;
+  else if (price > 1 && price <= 3) score += 15;
+  else if (price > 3 && price <= 5) score += 10;
+  else if (price > 5 && price <= 8) score += 6;
 
-  if (dayRet >= 3 && dayRet < 15) score += 10;
+  if (dayRet >= 4 && dayRet < 15) score += 10;
   else if (dayRet >= 15 && dayRet < 60) score += 18;
-  else if (dayRet >= 60) score += 12;
-  else if (dayRet < -20) score -= 8;
+  else if (dayRet >= 60 && dayRet < 180) score += 16;
+  else if (dayRet >= 180) score += 8;
 
-  if (dayVol >= 100000 && dayVol < 500000) score += 10;
-  else if (dayVol >= 500000 && dayVol < 5000000) score += 16;
-  else if (dayVol >= 5000000) score += 22;
+  if (dayVol >= 100000 && dayVol < 500000) score += 8;
+  else if (dayVol >= 500000 && dayVol < 5000000) score += 14;
+  else if (dayVol >= 5000000) score += 20;
 
-  if (dollarVol >= 100000 && dollarVol < 400000) score += 8;
-  else if (dollarVol >= 400000 && dollarVol < 2000000) score += 14;
-  else if (dollarVol >= 2000000) score += 20;
+  if (dollarVol >= 100000 && dollarVol < 500000) score += 8;
+  else if (dollarVol >= 500000 && dollarVol < 5000000) score += 14;
+  else if (dollarVol >= 5000000 && dollarVol < 50000000) score += 18;
+  else if (dollarVol >= 50000000) score += 8;
 
   if (String(asset.exchange || "").toUpperCase() === "NASDAQ") score += 2;
   if (String(asset.exchange || "").toUpperCase() === "AMEX") score += 2;
@@ -1401,13 +1630,14 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
       universeMode: "AUTO_DISCOVERY",
       discoveredUniverse: discovery.totalUniverse,
       quickPassed: discovery.passedQuick,
+      quickTop20: discovery.quickTop20,
       rows: [],
       summary: summarizeRows([]),
       message: "Quick discovery aday bulamadı."
     };
   }
 
-  const dailyLookbackStart = new Date(Date.now() - 140 * 86400000);
+  const dailyLookbackStart = new Date(Date.now() - 280 * 86400000);
   const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
   const dailyEnd = new Date().toISOString();
 
@@ -1439,20 +1669,19 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   nightlyRows.sort((a, b) => {
     const aKey =
       decisionRank(a.decision) * 100000 +
-      safeNum(a.patternScore, 0) * 100 +
-      safeNum(a.ignitionScore, 0);
-
+      safeNum(a.supernovaScore, 0) * 100 +
+      safeNum(a.familyScore, 0);
     const bKey =
       decisionRank(b.decision) * 100000 +
-      safeNum(b.patternScore, 0) * 100 +
-      safeNum(b.ignitionScore, 0);
-
+      safeNum(b.supernovaScore, 0) * 100 +
+      safeNum(b.familyScore, 0);
     return bKey - aKey;
   });
 
   if (session === "afterhours" || session === "closed") {
+    const topNightly = nightlyRows.slice(0, 40);
     return {
-      mode: "AUTO_ROCKET_NIGHTLY",
+      mode: "AUTO_ROCKET_NIGHTLY_V31",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1460,9 +1689,9 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
       discoveredUniverse: discovery.totalUniverse,
       quickPassed: discovery.passedQuick,
       quickTop20: discovery.quickTop20,
-      rows: nightlyRows.slice(0, 40),
-      summary: summarizeRows(nightlyRows.slice(0, 40)),
-      message: "Auto-discovery + nightly rocket shortlist üretildi."
+      rows: topNightly,
+      summary: summarizeRows(topNightly),
+      message: "Auto-discovery + nightly family shortlist üretildi."
     };
   }
 
@@ -1540,19 +1769,17 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   fullRows.sort((a, b) => {
     const aKey =
       decisionRank(a.decision) * 100000 +
-      safeNum(a.patternScore, 0) * 100 +
-      safeNum(a.premarketScore, 0);
-
+      safeNum(a.supernovaScore, 0) * 100 +
+      safeNum(a.familyScore, 0);
     const bKey =
       decisionRank(b.decision) * 100000 +
-      safeNum(b.patternScore, 0) * 100 +
-      safeNum(b.premarketScore, 0);
-
+      safeNum(b.supernovaScore, 0) * 100 +
+      safeNum(b.familyScore, 0);
     return bKey - aKey;
   });
 
   return {
-    mode: "AUTO_ROCKET_PREMARKET",
+    mode: "AUTO_ROCKET_PREMARKET_V31",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -1567,7 +1794,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
 }
 
 async function buildLiveManual(symbols, session, today, cutoffTime) {
-  const dailyLookbackStart = new Date(Date.now() - 140 * 86400000);
+  const dailyLookbackStart = new Date(Date.now() - 280 * 86400000);
   const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
   const dailyEnd = new Date().toISOString();
 
@@ -1576,15 +1803,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
       ? addDaysIso(today, 1)
       : today;
 
-  const dailyBarsMap = await fetchBarsBatched(
-    symbols,
-    "1Day",
-    dailyStart,
-    dailyEnd,
-    ALPACA_FEED,
-    50,
-    4
-  );
+  const dailyBarsMap = await fetchBarsBatched(symbols, "1Day", dailyStart, dailyEnd, ALPACA_FEED, 50, 4);
 
   if (session === "afterhours" || session === "closed") {
     const rows = [];
@@ -1600,19 +1819,17 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
     rows.sort((a, b) => {
       const aKey =
         decisionRank(a.decision) * 100000 +
-        safeNum(a.patternScore, 0) * 100 +
-        safeNum(a.ignitionScore, 0);
-
+        safeNum(a.supernovaScore, 0) * 100 +
+        safeNum(a.familyScore, 0);
       const bKey =
         decisionRank(b.decision) * 100000 +
-        safeNum(b.patternScore, 0) * 100 +
-        safeNum(b.ignitionScore, 0);
-
+        safeNum(b.supernovaScore, 0) * 100 +
+        safeNum(b.familyScore, 0);
       return bKey - aKey;
     });
 
     return {
-      mode: "MANUAL_ROCKET_NIGHTLY",
+      mode: "MANUAL_ROCKET_NIGHTLY_V31",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1622,7 +1839,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
       quickTop20: [],
       rows,
       summary: summarizeRows(rows),
-      message: "Manuel liste nightly rocket watchlist olarak işlendi."
+      message: "Manuel liste nightly shortlist olarak işlendi."
     };
   }
 
@@ -1656,26 +1873,10 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   let prior5MinMap = {};
   for (const s of symbols) prior5MinMap[s] = [];
 
-  const trade1MinMap = await fetchBarsBatched(
-    symbols,
-    "1Min",
-    tradeMinuteStart,
-    tradeMinuteEnd,
-    ALPACA_FEED,
-    50,
-    4
-  );
+  const trade1MinMap = await fetchBarsBatched(symbols, "1Min", tradeMinuteStart, tradeMinuteEnd, ALPACA_FEED, 50, 4);
 
   if (priorEndMs > priorStartMs) {
-    prior5MinMap = await fetchBarsBatched(
-      symbols,
-      "5Min",
-      priorMinuteStart,
-      priorMinuteEnd,
-      ALPACA_FEED,
-      50,
-      4
-    );
+    prior5MinMap = await fetchBarsBatched(symbols, "5Min", priorMinuteStart, priorMinuteEnd, ALPACA_FEED, 50, 4);
   }
 
   const rows = [];
@@ -1698,19 +1899,17 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   rows.sort((a, b) => {
     const aKey =
       decisionRank(a.decision) * 100000 +
-      safeNum(a.patternScore, 0) * 100 +
-      safeNum(a.premarketScore, 0);
-
+      safeNum(a.supernovaScore, 0) * 100 +
+      safeNum(a.familyScore, 0);
     const bKey =
       decisionRank(b.decision) * 100000 +
-      safeNum(b.patternScore, 0) * 100 +
-      safeNum(b.premarketScore, 0);
-
+      safeNum(b.supernovaScore, 0) * 100 +
+      safeNum(b.familyScore, 0);
     return bKey - aKey;
   });
 
   return {
-    mode: "MANUAL_ROCKET_PREMARKET",
+    mode: "MANUAL_ROCKET_PREMARKET_V31",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -1781,10 +1980,10 @@ async function buildLive(manualSymbolsRaw) {
 async function buildBacktest(dateStr, symbolsRaw) {
   const symbols = parseSymbols(symbolsRaw);
   if (!symbols.length) {
-    throw new Error("Backtest için manuel sembol listesi gerekli.");
+    throw new Error("Backtest için sembol listesi gerekli.");
   }
 
-  const dailyLookbackStart = new Date(new Date(dateStr).getTime() - 140 * 86400000);
+  const dailyLookbackStart = new Date(new Date(dateStr).getTime() - 280 * 86400000);
   const minuteLookbackStart = new Date(new Date(dateStr).getTime() - 12 * 86400000);
 
   const dailyStart = zonedDateTimeToUtcISO(dailyLookbackStart.toISOString().slice(0, 10), "00:00");
@@ -1833,19 +2032,17 @@ async function buildBacktest(dateStr, symbolsRaw) {
   rows.sort((a, b) => {
     const aKey =
       decisionRank(a.decision) * 100000 +
-      safeNum(a.patternScore, 0) * 100 +
-      safeNum(a.premarketScore, 0);
-
+      safeNum(a.supernovaScore, 0) * 100 +
+      safeNum(a.familyScore, 0);
     const bKey =
       decisionRank(b.decision) * 100000 +
-      safeNum(b.patternScore, 0) * 100 +
-      safeNum(b.premarketScore, 0);
-
+      safeNum(b.supernovaScore, 0) * 100 +
+      safeNum(b.familyScore, 0);
     return bKey - aKey;
   });
 
   return {
-    mode: "ROCKET_BACKTEST",
+    mode: "ROCKET_BACKTEST_V31",
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
@@ -1866,17 +2063,17 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova", async (req, res) => {
+app.get("/api/live-supernova-v31", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_SUPERNOVA error:", err);
+    console.error("LIVE_SUPERNOVA_V31 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-supernova", async (req, res) => {
+app.get("/api/backtest-supernova-v31", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -1886,7 +2083,7 @@ app.get("/api/backtest-supernova", async (req, res) => {
     const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_SUPERNOVA error:", err);
+    console.error("BACKTEST_SUPERNOVA_V31 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -1900,5 +2097,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v2 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.1 running on port ${PORT}`);
 });
