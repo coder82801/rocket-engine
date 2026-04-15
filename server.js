@@ -170,16 +170,64 @@ const FAMILY_MODELS = [
 const ASSET_CACHE = { expiresAt: 0, data: null };
 const DISCOVERY_CACHE = { expiresAt: 0, key: "", data: null };
 
+
 const CONFIRM_RULES = {
   triggerTolerance: 0.995,
   nearTolerance: 0.985,
-  minPremarketVolume: 25000,
-  minPremarketDollarVolume: 100000,
-  minSparseVolume: 5000,
-  minSparseDollarVolume: 25000,
   minHoldQuality: 55,
   strongHoldQuality: 65
 };
+
+const CONFIRM_VOLUME_TIERS = [
+  {
+    maxPrice: 0.5,
+    minPremarketVolume: 200000,
+    betterPremarketVolume: 500000,
+    minPremarketDollarVolume: 100000,
+    betterPremarketDollarVolume: 250000,
+    failBelowMultiplier: 0.94
+  },
+  {
+    maxPrice: 1,
+    minPremarketVolume: 250000,
+    betterPremarketVolume: 500000,
+    minPremarketDollarVolume: 150000,
+    betterPremarketDollarVolume: 300000,
+    failBelowMultiplier: 0.94
+  },
+  {
+    maxPrice: 3,
+    minPremarketVolume: 100000,
+    betterPremarketVolume: 250000,
+    minPremarketDollarVolume: 175000,
+    betterPremarketDollarVolume: 350000,
+    failBelowMultiplier: 0.95
+  },
+  {
+    maxPrice: 8,
+    minPremarketVolume: 30000,
+    betterPremarketVolume: 60000,
+    minPremarketDollarVolume: 200000,
+    betterPremarketDollarVolume: 400000,
+    failBelowMultiplier: 0.97
+  },
+  {
+    maxPrice: 15,
+    minPremarketVolume: 20000,
+    betterPremarketVolume: 40000,
+    minPremarketDollarVolume: 250000,
+    betterPremarketDollarVolume: 500000,
+    failBelowMultiplier: 0.97
+  },
+  {
+    maxPrice: Number.POSITIVE_INFINITY,
+    minPremarketVolume: 15000,
+    betterPremarketVolume: 30000,
+    minPremarketDollarVolume: 300000,
+    betterPremarketDollarVolume: 600000,
+    failBelowMultiplier: 0.975
+  }
+];
 
 function safeNum(v, fallback = 0) {
   if (v === null || v === undefined || v === "") return fallback;
@@ -1209,6 +1257,53 @@ function buildEntryPlan(decision, source, price, preVWAP, prevHigh) {
   };
 }
 
+
+function getConfirmTier(entryPrice) {
+  const p = safeNum(entryPrice, 0);
+  return CONFIRM_VOLUME_TIERS.find((tier) => p <= tier.maxPrice) || CONFIRM_VOLUME_TIERS[CONFIRM_VOLUME_TIERS.length - 1];
+}
+
+function buildConfirmProfile({ entryIdea, bestFamily }) {
+  const entry = safeNum(entryIdea, null);
+  if (entry == null || !Number.isFinite(entry) || entry <= 0) {
+    return {
+      triggerZoneLow: null,
+      triggerZoneHigh: null,
+      confirmAbove: null,
+      strongConfirmAbove: null,
+      failBelow: null,
+      minPremarketVolume: null,
+      betterPremarketVolume: null,
+      minPremarketDollarVolume: null,
+      betterPremarketDollarVolume: null,
+      sparseVolume: null,
+      sparseDollarVolume: null,
+      minHoldQuality: CONFIRM_RULES.minHoldQuality,
+      strongHoldQuality: CONFIRM_RULES.strongHoldQuality
+    };
+  }
+
+  const tier = getConfirmTier(entry);
+  const familyVolumeBoost = bestFamily === "NARRATIVE_PIVOT" ? 1.15 : 1;
+  const strongMultiplier = bestFamily === "NARRATIVE_PIVOT" ? 1.025 : 1.02;
+
+  return {
+    triggerZoneLow: roundSmart(entry * CONFIRM_RULES.nearTolerance),
+    triggerZoneHigh: roundSmart(entry),
+    confirmAbove: roundSmart(entry),
+    strongConfirmAbove: roundSmart(entry * strongMultiplier),
+    failBelow: roundSmart(entry * tier.failBelowMultiplier),
+    minPremarketVolume: Math.round(tier.minPremarketVolume * familyVolumeBoost),
+    betterPremarketVolume: Math.round(tier.betterPremarketVolume * familyVolumeBoost),
+    minPremarketDollarVolume: Math.round(tier.minPremarketDollarVolume * familyVolumeBoost),
+    betterPremarketDollarVolume: Math.round(tier.betterPremarketDollarVolume * familyVolumeBoost),
+    sparseVolume: Math.max(5000, Math.round(tier.minPremarketVolume * 0.25)),
+    sparseDollarVolume: Math.max(25000, Math.round(tier.minPremarketDollarVolume * 0.25)),
+    minHoldQuality: CONFIRM_RULES.minHoldQuality,
+    strongHoldQuality: CONFIRM_RULES.strongHoldQuality
+  };
+}
+
 function isNightlyWatchEligible({ structuralScore, ignitionScore, formerRunnerScore, familyScore, supernovaScore }) {
   return (
     structuralScore >= 36 &&
@@ -1219,33 +1314,45 @@ function isNightlyWatchEligible({ structuralScore, ignitionScore, formerRunnerSc
   );
 }
 
+
 function buildMorningConfirmation({
   baseDecision,
   setupEligible,
   pre,
-  entryIdea
+  entryIdea,
+  confirmProfile
 }) {
   const price = safeNum(pre.price, null);
   const hasPrice = price != null && Number.isFinite(price);
-  const triggerHit = hasPrice && entryIdea != null && price >= entryIdea;
-  const triggerNear = hasPrice && entryIdea != null && price >= entryIdea * CONFIRM_RULES.nearTolerance;
+  const triggerHit = hasPrice && confirmProfile.confirmAbove != null && price >= confirmProfile.confirmAbove;
+  const triggerNear = hasPrice && confirmProfile.triggerZoneLow != null && price >= confirmProfile.triggerZoneLow;
+  const strongPriceConfirm = hasPrice && confirmProfile.strongConfirmAbove != null && price >= confirmProfile.strongConfirmAbove;
+  const failBelow = hasPrice && confirmProfile.failBelow != null && price < confirmProfile.failBelow;
+
   const liquidityStrong =
-    safeNum(pre.preVol, 0) >= CONFIRM_RULES.minPremarketVolume ||
-    safeNum(pre.preDollarVol, 0) >= CONFIRM_RULES.minPremarketDollarVolume;
+    safeNum(pre.preVol, 0) >= safeNum(confirmProfile.betterPremarketVolume, Number.POSITIVE_INFINITY) ||
+    safeNum(pre.preDollarVol, 0) >= safeNum(confirmProfile.betterPremarketDollarVolume, Number.POSITIVE_INFINITY);
+  const liquidityOk =
+    safeNum(pre.preVol, 0) >= safeNum(confirmProfile.minPremarketVolume, Number.POSITIVE_INFINITY) ||
+    safeNum(pre.preDollarVol, 0) >= safeNum(confirmProfile.minPremarketDollarVolume, Number.POSITIVE_INFINITY);
   const liquiditySparse =
-    safeNum(pre.preVol, 0) >= CONFIRM_RULES.minSparseVolume ||
-    safeNum(pre.preDollarVol, 0) >= CONFIRM_RULES.minSparseDollarVolume;
-  const qualityOk = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= CONFIRM_RULES.minHoldQuality;
-  const qualityStrong = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= CONFIRM_RULES.strongHoldQuality;
+    safeNum(pre.preVol, 0) >= safeNum(confirmProfile.sparseVolume, Number.POSITIVE_INFINITY) ||
+    safeNum(pre.preDollarVol, 0) >= safeNum(confirmProfile.sparseDollarVolume, Number.POSITIVE_INFINITY);
+
+  const qualityOk = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= safeNum(confirmProfile.minHoldQuality, CONFIRM_RULES.minHoldQuality);
+  const qualityStrong = !!pre.abovePreVWAP && safeNum(pre.holdQuality, 0) >= safeNum(confirmProfile.strongHoldQuality, CONFIRM_RULES.strongHoldQuality);
 
   let confirmScore = 0;
-  if (triggerHit) confirmScore += 45;
-  else if (triggerNear) confirmScore += 20;
-  if (liquidityStrong) confirmScore += 30;
-  else if (liquiditySparse) confirmScore += 12;
-  if (qualityOk) confirmScore += 15;
-  if (qualityStrong) confirmScore += 5;
+  if (strongPriceConfirm) confirmScore += 50;
+  else if (triggerHit) confirmScore += 40;
+  else if (triggerNear) confirmScore += 18;
+  if (liquidityStrong) confirmScore += 28;
+  else if (liquidityOk) confirmScore += 20;
+  else if (liquiditySparse) confirmScore += 10;
+  if (qualityStrong) confirmScore += 17;
+  else if (qualityOk) confirmScore += 10;
   if (pre.abovePrevHigh) confirmScore += 5;
+  if (failBelow) confirmScore -= 20;
   confirmScore = clamp(Math.round(confirmScore), 0, 100);
 
   if (pre.source !== "REAL_PREMARKET") {
@@ -1255,7 +1362,20 @@ function buildMorningConfirmation({
       confirmScore,
       triggerHit,
       triggerNear,
-      notes: setupEligible ? ["Premarket teyidi yok: manuel kontrol gerekli"] : ["Premarket teyidi yok"]
+      notes: setupEligible
+        ? ["Premarket teyidi yok: manuel kontrol gerekli"]
+        : ["Premarket teyidi yok"]
+    };
+  }
+
+  if (failBelow) {
+    return {
+      decision: setupEligible ? "İZLE" : baseDecision,
+      confirmStatus: "FAIL_BELOW",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: ["Fiyat fail below altında", "Kurulum zayıfladı"]
     };
   }
 
@@ -1266,18 +1386,18 @@ function buildMorningConfirmation({
       confirmScore,
       triggerHit,
       triggerNear,
-      notes: ["Entry tetiklendi", "Premarket likiditesi yeterli", "VWAP üstünde teyit"]
+      notes: ["Entry tetiklendi", "Premarket likiditesi güçlü", "VWAP üstünde teyit"]
     };
   }
 
-  if (triggerHit && liquiditySparse && qualityOk) {
+  if (triggerHit && liquidityOk && qualityOk) {
     return {
       decision: "AL",
       confirmStatus: "TRIGGER_OK",
       confirmScore,
       triggerHit,
       triggerNear,
-      notes: ["Entry tetiklendi", "Likidite sınırlı ama yeterli"]
+      notes: ["Entry tetiklendi", "Likidite yeterli"]
     };
   }
 
@@ -1428,6 +1548,11 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     family.familyScore
   );
 
+  const confirmProfile = buildConfirmProfile({
+    entryIdea: buildEntryPlan("İZLE", "NONE", null, null, safeNum(ctx.last.h, 0)).entryIdea,
+    bestFamily: family.bestFamily
+  });
+
   const decision = structural.hardReject
     ? "ALMA"
     : finalNightlyDecision({
@@ -1495,6 +1620,16 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     stop: plan.stop,
     tp1: plan.tp1,
     tp2: plan.tp2,
+
+    triggerZoneLow: confirmProfile.triggerZoneLow,
+    triggerZoneHigh: confirmProfile.triggerZoneHigh,
+    confirmAbove: confirmProfile.confirmAbove,
+    strongConfirmAbove: confirmProfile.strongConfirmAbove,
+    failBelow: confirmProfile.failBelow,
+    minPremarketVolume: confirmProfile.minPremarketVolume,
+    betterPremarketVolume: confirmProfile.betterPremarketVolume,
+    minPremarketDollarVolume: confirmProfile.minPremarketDollarVolume,
+    betterPremarketDollarVolume: confirmProfile.betterPremarketDollarVolume,
 
     notes: [
       ...structural.notes,
@@ -1585,11 +1720,16 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
   });
 
   const provisionalPlan = buildEntryPlan(baseDecision === "ALMA" && setupEligible ? "İZLE" : baseDecision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
+  const confirmProfile = buildConfirmProfile({
+    entryIdea: provisionalPlan.entryIdea,
+    bestFamily: family.bestFamily
+  });
   const confirmation = buildMorningConfirmation({
     baseDecision,
     setupEligible,
     pre: preMetrics,
-    entryIdea: provisionalPlan.entryIdea
+    entryIdea: provisionalPlan.entryIdea,
+    confirmProfile
   });
 
   const decision = confirmation.decision;
@@ -1655,6 +1795,16 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     stop: plan.stop,
     tp1: plan.tp1,
     tp2: plan.tp2,
+
+    triggerZoneLow: confirmProfile.triggerZoneLow,
+    triggerZoneHigh: confirmProfile.triggerZoneHigh,
+    confirmAbove: confirmProfile.confirmAbove,
+    strongConfirmAbove: confirmProfile.strongConfirmAbove,
+    failBelow: confirmProfile.failBelow,
+    minPremarketVolume: confirmProfile.minPremarketVolume,
+    betterPremarketVolume: confirmProfile.betterPremarketVolume,
+    minPremarketDollarVolume: confirmProfile.minPremarketDollarVolume,
+    betterPremarketDollarVolume: confirmProfile.betterPremarketDollarVolume,
 
     notes: [
       ...structural.notes,
@@ -1880,7 +2030,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   if (session === "afterhours" || session === "closed") {
     const topNightly = nightlyRows.slice(0, 40);
     return {
-      mode: "AUTO_ROCKET_NIGHTLY_V33",
+      mode: "AUTO_ROCKET_NIGHTLY_V34",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1978,7 +2128,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   });
 
   return {
-    mode: "AUTO_ROCKET_PREMARKET_V33",
+    mode: "AUTO_ROCKET_PREMARKET_V34",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2028,7 +2178,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
     });
 
     return {
-      mode: "MANUAL_ROCKET_NIGHTLY_V33",
+      mode: "MANUAL_ROCKET_NIGHTLY_V34",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -2108,7 +2258,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   });
 
   return {
-    mode: "MANUAL_ROCKET_PREMARKET_V33",
+    mode: "MANUAL_ROCKET_PREMARKET_V34",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2241,7 +2391,7 @@ async function buildBacktest(dateStr, symbolsRaw) {
   });
 
   return {
-    mode: "ROCKET_BACKTEST_V33",
+    mode: "ROCKET_BACKTEST_V34",
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
@@ -2262,17 +2412,17 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova-v33", async (req, res) => {
+app.get("/api/live-supernova-v34", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_SUPERNOVA_V33 error:", err);
+    console.error("LIVE_SUPERNOVA_V34 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-supernova-v33", async (req, res) => {
+app.get("/api/backtest-supernova-v34", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -2282,7 +2432,7 @@ app.get("/api/backtest-supernova-v33", async (req, res) => {
     const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_SUPERNOVA_V33 error:", err);
+    console.error("BACKTEST_SUPERNOVA_V34 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -2296,5 +2446,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v3.3 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.4 running on port ${PORT}`);
 });
