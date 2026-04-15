@@ -15,7 +15,7 @@ app.use(express.static(__dirname));
 
 const DEFAULT_SYMBOLS = [
   "RMSG", "ROLR", "RAYA", "CUE", "ELAB", "CYCN", "VCX", "LPA",
-  "CTMX", "SOPA", "RR", "TNON", "SIDU", "SQFT", "FUSE", "CREG"
+  "CTMX", "SOPA", "RR", "TNON", "SIDU", "SQFT", "FUSE", "CREG", "BIRD"
 ];
 
 const ALLOWED_EXCHANGES = new Set(["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]);
@@ -31,6 +31,7 @@ const CATALYST_GRADES = {
   strategic_collaboration: 20,
   ai_transition: 18,
   prediction_market_pivot: 18,
+  narrative_pivot: 22,
   biotech_data: 26,
   fda: 30,
   contract_award: 24,
@@ -85,6 +86,17 @@ const SYMBOL_FLAGS = {
     catalystType: "ai_transition",
     allowAbove8: true,
     marketCapOverride: 14289000000
+  },
+  BIRD: {
+    recentReverseSplit: false,
+    otcRisk: false,
+    recentDeficiency: false,
+    catalystFresh: true,
+    catalystType: "narrative_pivot",
+    allowAbove8: true,
+    marketCapOverride: 147951000,
+    financingRisk: true,
+    narrativePivot: true
   }
 };
 
@@ -135,6 +147,22 @@ const FAMILY_MODELS = [
       gapPct: { weight: 10, ideal: [10, 120], hard: [-10, 250] },
       preVolRatio: { weight: 8, ideal: [1, 12], hard: [0.2, 40] },
       holdQuality: { weight: 12, ideal: [60, 100], hard: [35, 100] }
+    }
+  },
+  {
+    name: "NARRATIVE_PIVOT",
+    features: {
+      price: { weight: 7, ideal: [0.80, 12.00], hard: [0.20, 20.00] },
+      drawdown90: { weight: 7, ideal: [-95, -20], hard: [-99, 20] },
+      baseTightness10: { weight: 5, ideal: [8, 60], hard: [0, 120] },
+      prevDayRet: { weight: 14, ideal: [25, 250], hard: [-5, 600] },
+      prevVolRatio: { weight: 14, ideal: [5, 100], hard: [0.5, 400] },
+      prevDollarShock: { weight: 14, ideal: [5, 100], hard: [0.5, 400] },
+      prevCloseStrength: { weight: 8, ideal: [55, 100], hard: [20, 100] },
+      breakout20: { weight: 4, ideal: [1, 1], hard: [0, 1] },
+      gapPct: { weight: 12, ideal: [20, 250], hard: [-10, 600] },
+      preVolRatio: { weight: 7, ideal: [1, 20], hard: [0.1, 80] },
+      holdQuality: { weight: 8, ideal: [50, 100], hard: [20, 100] }
     }
   }
 ];
@@ -201,6 +229,8 @@ function getFlags(symbol) {
     allowAbove8: false,
     marketCapOverride: null,
     floatOverride: null,
+    financingRisk: false,
+    narrativePivot: false,
     ...(SYMBOL_FLAGS[symbol] || {})
   };
 }
@@ -570,7 +600,9 @@ function buildIgnitionMetrics(ctx, flags) {
     rangeExpansion,
     catalystFresh: !!flags.catalystFresh,
     catalystType: flags.catalystType || "none",
-    catalystGrade: catalystGrade(flags.catalystType || "none")
+    catalystGrade: catalystGrade(flags.catalystType || "none"),
+    financingRisk: !!flags.financingRisk,
+    narrativePivot: !!flags.narrativePivot
   };
 }
 
@@ -676,12 +708,18 @@ function buildRotationMetrics(structuralMetrics, ignitionMetrics, preMetrics) {
   const volumeFloatRotation =
     floatBase > 0 ? safeNum(ignitionMetrics.prevVolRatio, 0) * 0.25 : 0;
 
+  const proxyRotationComposite =
+    0.45 * safeNum(ignitionMetrics.prevVolRatio, 0) +
+    0.40 * safeNum(ignitionMetrics.prevDollarShock, 0) +
+    0.15 * safeNum(preMetrics.preVolRatio, 0);
+
   return {
     floatBase,
     usingProxyFloat,
     prevTurnover,
     preTurnover,
-    volumeFloatRotation
+    volumeFloatRotation,
+    proxyRotationComposite
   };
 }
 
@@ -766,8 +804,8 @@ function scoreStructural(m, flags) {
     return { score: 0, notes, hardReject: true };
   }
 
-  if (m.price > 8 && !flags.allowAbove8) {
-    notes.push("8 dolar üstü");
+  if (m.price > 12 && !flags.allowAbove8) {
+    notes.push("12 dolar üstü");
     return { score: 0, notes, hardReject: true };
   }
 
@@ -775,6 +813,10 @@ function scoreStructural(m, flags) {
   else if (m.price > 1 && m.price <= 3) score += 18;
   else if (m.price > 3 && m.price <= 5) score += 12;
   else if (m.price > 5 && m.price <= 8) score += 6;
+  else if (m.price > 8 && m.price <= 12) {
+    score += 2;
+    notes.push("8-12 bandı");
+  }
 
   if (m.marketCap != null && m.marketCap > 0) {
     if (m.marketCap >= 10000000 && m.marketCap <= 120000000) score += 12;
@@ -831,9 +873,12 @@ function scoreIgnition(m) {
   if (m.prevDayRet >= 4 && m.prevDayRet < 15) score += 14;
   else if (m.prevDayRet >= 15 && m.prevDayRet < 45) score += 20;
   else if (m.prevDayRet >= 45 && m.prevDayRet < 120) score += 16;
-  else if (m.prevDayRet >= 120) {
-    score += 8;
+  else if (m.prevDayRet >= 120 && m.prevDayRet < 250) {
+    score += 10;
     notes.push("Aşırı sıcak ilk gün");
+  } else if (m.prevDayRet >= 250) {
+    score += 4;
+    notes.push("Mania spike");
   } else if (m.prevDayRet < 0) {
     score -= 12;
   }
@@ -883,6 +928,21 @@ function scoreIgnition(m) {
   } else if (m.catalystGrade < 0) {
     score += m.catalystGrade;
     notes.push(`Negative catalyst: ${m.catalystType}`);
+  }
+
+  if (m.narrativePivot) {
+    score += 4;
+    notes.push("Narrative pivot");
+  }
+
+  if (m.financingRisk) {
+    score -= 8;
+    notes.push("Financing/dilution riski");
+  }
+
+  if (m.prevDayRet >= 250 && m.financingRisk) {
+    score -= 6;
+    notes.push("Mania + financing riski");
   }
 
   score = clamp(Math.round(score), 0, 100);
@@ -945,6 +1005,13 @@ function scoreRotation(m, source) {
 
     if (m.volumeFloatRotation >= 1 && m.volumeFloatRotation < 2.5) score += 8;
     else if (m.volumeFloatRotation >= 2.5) score += 12;
+  } else {
+    if (m.proxyRotationComposite >= 4 && m.proxyRotationComposite < 10) score += 8;
+    else if (m.proxyRotationComposite >= 10 && m.proxyRotationComposite < 20) score += 16;
+    else if (m.proxyRotationComposite >= 20) {
+      score += 22;
+      notes.push("Rotation proxy strong");
+    }
   }
 
   score = clamp(Math.round(score), 0, 100);
@@ -1543,7 +1610,7 @@ function scoreQuickDiscovery(asset, snap) {
   const dollarVol = price != null ? price * dayVol : 0;
   const dayRet = prevClose && price ? ((price - prevClose) / prevClose) * 100 : 0;
 
-  if (price == null || price < 0.10 || price > 8.00) return null;
+  if (price == null || price < 0.10 || price > 12.00) return null;
   if (dayVol < 50000) return null;
   if (dollarVol < 100000) return null;
 
@@ -1553,6 +1620,7 @@ function scoreQuickDiscovery(asset, snap) {
   else if (price > 1 && price <= 3) score += 15;
   else if (price > 3 && price <= 5) score += 10;
   else if (price > 5 && price <= 8) score += 6;
+  else if (price > 8 && price <= 12) score += 3;
 
   if (dayRet >= 4 && dayRet < 15) score += 10;
   else if (dayRet >= 15 && dayRet < 60) score += 18;
@@ -1681,7 +1749,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   if (session === "afterhours" || session === "closed") {
     const topNightly = nightlyRows.slice(0, 40);
     return {
-      mode: "AUTO_ROCKET_NIGHTLY_V31",
+      mode: "AUTO_ROCKET_NIGHTLY_V32",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1779,7 +1847,7 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   });
 
   return {
-    mode: "AUTO_ROCKET_PREMARKET_V31",
+    mode: "AUTO_ROCKET_PREMARKET_V32",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -1829,7 +1897,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
     });
 
     return {
-      mode: "MANUAL_ROCKET_NIGHTLY_V31",
+      mode: "MANUAL_ROCKET_NIGHTLY_V32",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -1909,7 +1977,7 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   });
 
   return {
-    mode: "MANUAL_ROCKET_PREMARKET_V31",
+    mode: "MANUAL_ROCKET_PREMARKET_V32",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2042,7 +2110,7 @@ async function buildBacktest(dateStr, symbolsRaw) {
   });
 
   return {
-    mode: "ROCKET_BACKTEST_V31",
+    mode: "ROCKET_BACKTEST_V32",
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
@@ -2063,17 +2131,17 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova-v31", async (req, res) => {
+app.get("/api/live-supernova-v32", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_SUPERNOVA_V31 error:", err);
+    console.error("LIVE_SUPERNOVA_V32 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-supernova-v31", async (req, res) => {
+app.get("/api/backtest-supernova-v32", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -2083,7 +2151,7 @@ app.get("/api/backtest-supernova-v31", async (req, res) => {
     const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_SUPERNOVA_V31 error:", err);
+    console.error("BACKTEST_SUPERNOVA_V32 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -2097,5 +2165,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v3.1 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.2 running on port ${PORT}`);
 });
