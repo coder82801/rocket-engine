@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine v3.2 — Family Supernova</title>
+  <title>Rocket Engine v3.3 — Family Supernova</title>
   <style>
     :root{
       --bg:#07111f;
@@ -192,9 +192,11 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine v3.2 — Family Supernova</h1>
+      <h1>🚀 Rocket Engine v3.3 — Family Supernova</h1>
       <div class="sub">
         Bu sürümde ek olarak <b>Former Runner</b>, <b>Halt Proxy</b>, <b>Rotation Proxy</b>, <b>Narrative Pivot</b> ve <b>Catalyst Grade</b> mantığı var.
+        <br>
+        v3.3: Gece setup bulur, sabah tetik teyidi verir, veri yetersizse confirmed demez.
         <br>
         Boş sembol alanı = auto-discovery.
         Backtest tarafı = manuel liste doğrulaması.
@@ -253,6 +255,7 @@
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Confirm</th>
                 <th>Supernova</th>
                 <th>Struct</th>
                 <th>Ignite</th>
@@ -341,6 +344,7 @@
             <thead>
               <tr>
                 <th>Decision</th>
+                <th>Confirm</th>
                 <th>Supernova</th>
                 <th>Struct</th>
                 <th>Ignite</th>
@@ -401,23 +405,23 @@
     }
 
     function decisionClass(decision) {
-      if (decision === "GÜÇLÜ AL") return "decision-strong";
+      if (decision === "SUPERNOVA_CONFIRMED" || decision === "GÜÇLÜ AL") return "decision-strong";
       if (decision === "AL") return "decision-buy";
-      if (decision === "İZLE") return "decision-watch";
+      if (decision === "MANUAL_CONFIRM_REQUIRED" || decision === "SPARSE_PREMARKET" || decision === "WATCH_TRIGGER" || decision === "İZLE") return "decision-watch";
       return "decision-no";
     }
 
     function badge(decision) {
-      if (decision === "GÜÇLÜ AL") return "badge strong";
+      if (decision === "SUPERNOVA_CONFIRMED" || decision === "GÜÇLÜ AL") return "badge strong";
       if (decision === "AL") return "badge buy";
-      if (decision === "İZLE") return "badge watch";
+      if (decision === "MANUAL_CONFIRM_REQUIRED" || decision === "SPARSE_PREMARKET" || decision === "WATCH_TRIGGER" || decision === "İZLE") return "badge watch";
       return "badge no";
     }
 
     function renderTop(containerId, rows) {
       const wrap = document.getElementById(containerId);
       const picks = (rows || [])
-        .filter((r) => ["GÜÇLÜ AL", "AL", "İZLE"].includes(r.decision))
+        .filter((r) => ["SUPERNOVA_CONFIRMED", "GÜÇLÜ AL", "AL", "MANUAL_CONFIRM_REQUIRED", "SPARSE_PREMARKET", "WATCH_TRIGGER", "İZLE"].includes(r.decision))
         .slice(0, 3);
 
       if (!picks.length) {
@@ -438,6 +442,7 @@
             <div><span class="k">Premkt</span>${fmt(x.premarketScore, 0)}</div>
             <div><span class="k">Family</span>${fmt(x.familyScore, 0)}</div>
             <div><span class="k">Best Family</span>${x.bestFamily || "-"}</div>
+            <div><span class="k">Confirm</span>${x.confirmStatus || "-"}</div>
             <div><span class="k">Entry Type</span>${x.entryType || "-"}</div>
             <div><span class="k">Entry</span>${x.entryIdea == null ? "-" : fmt(x.entryIdea, x.entryIdea < 1 ? 4 : 2)}</div>
           </div>
@@ -508,6 +513,7 @@
       tbody.innerHTML = rows.map((x) => `
         <tr>
           <td class="${decisionClass(x.decision)}">${x.decision}</td>
+          <td>${x.confirmStatus || "-"}</td>
           <td>${fmt(x.supernovaScore, 0)}</td>
           <td>${fmt(x.structuralScore, 0)}</td>
           <td>${fmt(x.ignitionScore, 0)}</td>
@@ -549,6 +555,7 @@
       tbody.innerHTML = rows.map((x) => `
         <tr>
           <td class="${decisionClass(x.decision)}">${x.decision}</td>
+          <td>${x.confirmStatus || "-"}</td>
           <td>${fmt(x.supernovaScore, 0)}</td>
           <td>${fmt(x.structuralScore, 0)}</td>
           <td>${fmt(x.ignitionScore, 0)}</td>
@@ -587,7 +594,7 @@
         const query = symbols.length
           ? `?symbols=${encodeURIComponent(symbols.join(","))}`
           : "";
-        const data = await apiJson(`/api/live-supernova-v32${query}`);
+        const data = await apiJson(`/api/live-supernova-v33${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -605,7 +612,7 @@
         if (!date) throw new Error("Tarih seç.");
         if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
 
-        const data = await apiJson(`/api/backtest-supernova-v32?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        const data = await apiJson(`/api/backtest-supernova-v33?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
