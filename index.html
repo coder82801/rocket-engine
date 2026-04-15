@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine v3.3 — Family Supernova</title>
+  <title>Rocket Engine v3.4 — Family Supernova</title>
   <style>
     :root{
       --bg:#07111f;
@@ -192,11 +192,11 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine v3.3 — Family Supernova</h1>
+      <h1>🚀 Rocket Engine v3.4 — Family Supernova</h1>
       <div class="sub">
         Bu sürümde ek olarak <b>Former Runner</b>, <b>Halt Proxy</b>, <b>Rotation Proxy</b>, <b>Narrative Pivot</b> ve <b>Catalyst Grade</b> mantığı var.
         <br>
-        v3.3: Gece setup bulur, sabah tetik teyidi verir, veri yetersizse confirmed demez.
+        v3.4: Gece setup bulur, sabah tetik teyidi verir, veri yetersizse confirmed demez.
         <br>
         Boş sembol alanı = auto-discovery.
         Backtest tarafı = manuel liste doğrulaması.
@@ -272,6 +272,12 @@
                 <th>Hold</th>
                 <th>Entry Type</th>
                 <th>Entry</th>
+                <th>Trigger Zone</th>
+                <th>Confirm Above</th>
+                <th>Strong Confirm</th>
+                <th>Fail Below</th>
+                <th>PM Vol Min/Better</th>
+                <th>PM $Vol Min/Better</th>
                 <th>Stop</th>
                 <th>TP1</th>
                 <th>TP2</th>
@@ -281,7 +287,7 @@
               </tr>
             </thead>
             <tbody id="liveRows">
-              <tr><td colspan="23" class="muted">Henüz tarama yapılmadı.</td></tr>
+              <tr><td colspan="29" class="muted">Henüz tarama yapılmadı.</td></tr>
             </tbody>
           </table>
         </div>
@@ -359,6 +365,10 @@
                 <th>Vol Ratio</th>
                 <th>Hold</th>
                 <th>Entry</th>
+                <th>Trigger Zone</th>
+                <th>Confirm Above</th>
+                <th>PM Vol Min/Better</th>
+                <th>PM $Vol Min/Better</th>
                 <th>Entry Reached</th>
                 <th>Entry→High %</th>
                 <th>Open→High %</th>
@@ -368,7 +378,7 @@
               </tr>
             </thead>
             <tbody id="btRows">
-              <tr><td colspan="21" class="muted">Henüz backtest yapılmadı.</td></tr>
+              <tr><td colspan="26" class="muted">Henüz backtest yapılmadı.</td></tr>
             </tbody>
           </table>
         </div>
@@ -445,6 +455,9 @@
             <div><span class="k">Confirm</span>${x.confirmStatus || "-"}</div>
             <div><span class="k">Entry Type</span>${x.entryType || "-"}</div>
             <div><span class="k">Entry</span>${x.entryIdea == null ? "-" : fmt(x.entryIdea, x.entryIdea < 1 ? 4 : 2)}</div>
+            <div><span class="k">Trigger Zone</span>${confirmRangeText(x)}</div>
+            <div><span class="k">PM Vol Min/Better</span>${confirmVolumeText(x)}</div>
+            <div><span class="k">PM $Vol Min/Better</span>${confirmDollarText(x)}</div>
           </div>
         </div>
       `).join("");
@@ -492,6 +505,27 @@
       return `E252:${x.explosiveDays252 ?? 0} | E63:${x.explosiveDays63 ?? 0} | H252:${x.haltProxyDays252 ?? 0} | H63:${x.haltProxyDays63 ?? 0}`;
     }
 
+    function confirmRangeText(x) {
+      const low = x.triggerZoneLow;
+      const high = x.triggerZoneHigh;
+      if (low == null || high == null) return "-";
+      return `${fmt(low, low < 1 ? 4 : 2)} - ${fmt(high, high < 1 ? 4 : 2)}`;
+    }
+
+    function confirmVolumeText(x) {
+      const mv = x.minPremarketVolume;
+      const bv = x.betterPremarketVolume;
+      if (mv == null || bv == null) return "-";
+      return `${mv} / ${bv}+`;
+    }
+
+    function confirmDollarText(x) {
+      const md = x.minPremarketDollarVolume;
+      const bd = x.betterPremarketDollarVolume;
+      if (md == null || bd == null) return "-";
+      return `${md} / ${bd}+`;
+    }
+
     function renderLive(data) {
       document.getElementById("liveMode").value = data.mode || "-";
       document.getElementById("liveSession").value = data.session || "-";
@@ -530,6 +564,12 @@
           <td>${x.holdQuality == null ? "-" : fmt(x.holdQuality, 1)}</td>
           <td>${x.entryType || "-"}</td>
           <td>${x.entryIdea == null ? "-" : fmt(x.entryIdea, x.entryIdea < 1 ? 4 : 2)}</td>
+          <td>${confirmRangeText(x)}</td>
+          <td>${x.confirmAbove == null ? "-" : fmt(x.confirmAbove, x.confirmAbove < 1 ? 4 : 2)}</td>
+          <td>${x.strongConfirmAbove == null ? "-" : fmt(x.strongConfirmAbove, x.strongConfirmAbove < 1 ? 4 : 2)}</td>
+          <td>${x.failBelow == null ? "-" : fmt(x.failBelow, x.failBelow < 1 ? 4 : 2)}</td>
+          <td>${confirmVolumeText(x)}</td>
+          <td>${confirmDollarText(x)}</td>
           <td>${x.stop == null ? "-" : fmt(x.stop, x.stop < 1 ? 4 : 2)}</td>
           <td>${x.tp1 == null ? "-" : fmt(x.tp1, x.tp1 < 1 ? 4 : 2)}</td>
           <td>${x.tp2 == null ? "-" : fmt(x.tp2, x.tp2 < 1 ? 4 : 2)}</td>
@@ -570,6 +610,10 @@
           <td>${fmt(x.preVolRatio, 2)}</td>
           <td>${x.holdQuality == null ? "-" : fmt(x.holdQuality, 1)}</td>
           <td>${x.entryIdea == null ? "-" : fmt(x.entryIdea, x.entryIdea < 1 ? 4 : 2)}</td>
+          <td>${confirmRangeText(x)}</td>
+          <td>${x.confirmAbove == null ? "-" : fmt(x.confirmAbove, x.confirmAbove < 1 ? 4 : 2)}</td>
+          <td>${confirmVolumeText(x)}</td>
+          <td>${confirmDollarText(x)}</td>
           <td>${x.entryReached ? "YES" : "NO"}</td>
           <td>${x.realizedEntryToHighPct == null ? "-" : fmt(x.realizedEntryToHighPct, 2)}</td>
           <td>${x.realizedOpenToHighPct == null ? "-" : fmt(x.realizedOpenToHighPct, 2)}</td>
@@ -594,7 +638,7 @@
         const query = symbols.length
           ? `?symbols=${encodeURIComponent(symbols.join(","))}`
           : "";
-        const data = await apiJson(`/api/live-supernova-v33${query}`);
+        const data = await apiJson(`/api/live-supernova-v34${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -612,7 +656,7 @@
         if (!date) throw new Error("Tarih seç.");
         if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
 
-        const data = await apiJson(`/api/backtest-supernova-v33?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        const data = await apiJson(`/api/backtest-supernova-v34?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
