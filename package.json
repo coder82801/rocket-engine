@@ -1,7 +1,7 @@
 {
-  "name": "rocket-engine-v35",
-  "version": "3.5.0",
-  "description": "Rocket Engine v3.5 - reverse split hard reject and clean recovery bias",
+  "name": "rocket-engine-v36",
+  "version": "3.6.0",
+  "description": "Rocket Engine v3.6 - reverse split hard reject and clean recovery bias",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
