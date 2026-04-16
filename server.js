@@ -390,29 +390,36 @@ function timeZoneParts(date, timeZone = "America/New_York") {
   return out;
 }
 
-function getTimeZoneOffsetMs(date, timeZone = "America/New_York") {
-  const parts = timeZoneParts(date, timeZone);
-  const asUTC = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second)
-  );
-  return asUTC - date.getTime();
+function getOffsetMinutesForZone(date, timeZone = "America/New_York") {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "shortOffset",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false
+  }).formatToParts(date);
+
+  const tzName = parts.find((p) => p.type === "timeZoneName")?.value || "GMT";
+  const m = tzName.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
+
+  if (!m) return 0;
+
+  const sign = m[1] === "-" ? -1 : 1;
+  const hh = Number(m[2]);
+  const mm = Number(m[3] || 0);
+
+  return sign * (hh * 60 + mm);
 }
 
 function zonedDateTimeToUtcISO(dateStr, timeStr, timeZone = "America/New_York") {
   const [year, month, day] = dateStr.split("-").map(Number);
   const [hour, minute] = timeStr.split(":").map(Number);
 
-  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
-  for (let i = 0; i < 3; i++) {
-    const offset = getTimeZoneOffsetMs(guess, timeZone);
-    guess = new Date(guess.getTime() - offset);
-  }
-  return guess.toISOString();
+  const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
+  const offsetMinutes = getOffsetMinutesForZone(new Date(naiveUtcMs), timeZone);
+  const actualUtcMs = naiveUtcMs - offsetMinutes * 60 * 1000;
+
+  return new Date(actualUtcMs).toISOString();
 }
 
 function addDaysIso(dateStr, days) {
