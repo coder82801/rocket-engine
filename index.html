@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Rocket Engine v3.4 — Family Supernova</title>
+  <title>Rocket Engine v3.5 — Clean Recovery Supernova</title>
   <style>
     :root{
       --bg:#07111f;
@@ -192,11 +192,11 @@
 <body>
   <div class="wrap">
     <div class="card">
-      <h1>🚀 Rocket Engine v3.4 — Family Supernova</h1>
+      <h1>🚀 Rocket Engine v3.5 — Clean Recovery Supernova</h1>
       <div class="sub">
         Bu sürümde ek olarak <b>Former Runner</b>, <b>Halt Proxy</b>, <b>Rotation Proxy</b>, <b>Narrative Pivot</b> ve <b>Catalyst Grade</b> mantığı var.
         <br>
-        v3.4: Gece setup bulur, sabah tetik teyidi verir, veri yetersizse confirmed demez.
+        v3.5: Reverse split hard reject + clean collapse recovery bias. Gece setup bulur, sabah tetik teyidi verir, veri yetersizse confirmed demez.
         <br>
         Boş sembol alanı = auto-discovery.
         Backtest tarafı = manuel liste doğrulaması.
@@ -638,7 +638,7 @@
         const query = symbols.length
           ? `?symbols=${encodeURIComponent(symbols.join(","))}`
           : "";
-        const data = await apiJson(`/api/live-supernova-v34${query}`);
+        const data = await apiJson(`/api/live-supernova-v35${query}`);
         renderLive(data);
         setStatus("liveStatus", data.message ? data.message : "Canlı tarama tamamlandı.", data.message ? "warn" : "ok");
       } catch (err) {
@@ -656,7 +656,7 @@
         if (!date) throw new Error("Tarih seç.");
         if (!symbols.length) throw new Error("Backtest için sembol listesi gir.");
 
-        const data = await apiJson(`/api/backtest-supernova-v34?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
+        const data = await apiJson(`/api/backtest-supernova-v35?date=${encodeURIComponent(date)}&symbols=${encodeURIComponent(symbols.join(","))}`);
         renderBacktest(data);
         setStatus("btStatus", "Backtest tamamlandı.", "ok");
       } catch (err) {
