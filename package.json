@@ -1,7 +1,7 @@
 {
-  "name": "rocket-engine-v34",
-  "version": "3.4.0",
-  "description": "Rocket Engine v3.4 - confirm ranges for nightly setups and morning trigger validation",
+  "name": "rocket-engine-v35",
+  "version": "3.5.0",
+  "description": "Rocket Engine v3.5 - reverse split hard reject and clean recovery bias",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
