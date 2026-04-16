@@ -390,36 +390,29 @@ function timeZoneParts(date, timeZone = "America/New_York") {
   return out;
 }
 
-function getOffsetMinutesForZone(date, timeZone = "America/New_York") {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    timeZoneName: "shortOffset",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).formatToParts(date);
-
-  const tzName = parts.find((p) => p.type === "timeZoneName")?.value || "GMT";
-  const m = tzName.match(/^GMT([+-])(\d{1,2})(?::?(\d{2}))?$/);
-
-  if (!m) return 0;
-
-  const sign = m[1] === "-" ? -1 : 1;
-  const hh = Number(m[2]);
-  const mm = Number(m[3] || 0);
-
-  return sign * (hh * 60 + mm);
+function getTimeZoneOffsetMs(date, timeZone = "America/New_York") {
+  const parts = timeZoneParts(date, timeZone);
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+  return asUTC - date.getTime();
 }
 
 function zonedDateTimeToUtcISO(dateStr, timeStr, timeZone = "America/New_York") {
   const [year, month, day] = dateStr.split("-").map(Number);
   const [hour, minute] = timeStr.split(":").map(Number);
 
-  const naiveUtcMs = Date.UTC(year, month - 1, day, hour, minute, 0);
-  const offsetMinutes = getOffsetMinutesForZone(new Date(naiveUtcMs), timeZone);
-  const actualUtcMs = naiveUtcMs - offsetMinutes * 60 * 1000;
-
-  return new Date(actualUtcMs).toISOString();
+  let guess = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  for (let i = 0; i < 3; i++) {
+    const offset = getTimeZoneOffsetMs(guess, timeZone);
+    guess = new Date(guess.getTime() - offset);
+  }
+  return guess.toISOString();
 }
 
 function addDaysIso(dateStr, days) {
@@ -1513,10 +1506,54 @@ function isNightlyWatchEligible({
   );
 }
 
+function isManualConfirmCandidate({
+  structuralScore,
+  ignitionScore,
+  formerRunnerScore,
+  familyScore,
+  supernovaScore,
+  cleanRecoveryScore,
+  bestFamily,
+  explicitNarrativePivot
+}) {
+  if (bestFamily === "NARRATIVE_PIVOT" && !explicitNarrativePivot) return false;
+  return (
+    structuralScore >= 32 &&
+    familyScore >= 46 &&
+    supernovaScore >= 42 &&
+    cleanRecoveryScore >= 34 &&
+    (
+      ignitionScore >= 28 ||
+      formerRunnerScore >= 22 ||
+      bestFamily === "CLEAN_RECOVERY" ||
+      explicitNarrativePivot
+    )
+  );
+}
+
+function isSparsePremarketCandidate({
+  structuralScore,
+  ignitionScore,
+  formerRunnerScore,
+  familyScore,
+  supernovaScore,
+  cleanRecoveryScore
+}) {
+  return (
+    structuralScore >= 28 &&
+    familyScore >= 40 &&
+    supernovaScore >= 36 &&
+    cleanRecoveryScore >= 28 &&
+    (ignitionScore >= 24 || formerRunnerScore >= 16)
+  );
+}
+
 
 function buildMorningConfirmation({
   baseDecision,
   setupEligible,
+  manualEligible,
+  sparseEligible,
   pre,
   entryIdea,
   confirmProfile
@@ -1555,21 +1592,41 @@ function buildMorningConfirmation({
   confirmScore = clamp(Math.round(confirmScore), 0, 100);
 
   if (pre.source !== "REAL_PREMARKET") {
+    if (setupEligible || manualEligible) {
+      return {
+        decision: "MANUAL_CONFIRM_REQUIRED",
+        confirmStatus: "NO_PREMARKET_CONFIRM",
+        confirmScore,
+        triggerHit,
+        triggerNear,
+        notes: ["Premarket teyidi yok: manuel kontrol gerekli", "IEX verisi seyrek olabilir"]
+      };
+    }
+
+    if (sparseEligible) {
+      return {
+        decision: "SPARSE_PREMARKET",
+        confirmStatus: "NO_PREMARKET_CONFIRM",
+        confirmScore,
+        triggerHit,
+        triggerNear,
+        notes: ["Kurulum zayıf değil", "Premarket teyidi eksik", "Confirmed deme"]
+      };
+    }
+
     return {
-      decision: setupEligible ? "MANUAL_CONFIRM_REQUIRED" : baseDecision,
+      decision: baseDecision,
       confirmStatus: "NO_PREMARKET_CONFIRM",
       confirmScore,
       triggerHit,
       triggerNear,
-      notes: setupEligible
-        ? ["Premarket teyidi yok: manuel kontrol gerekli"]
-        : ["Premarket teyidi yok"]
+      notes: ["Premarket teyidi yok"]
     };
   }
 
   if (failBelow) {
     return {
-      decision: setupEligible ? "İZLE" : baseDecision,
+      decision: setupEligible || manualEligible ? "İZLE" : baseDecision,
       confirmStatus: "FAIL_BELOW",
       confirmScore,
       triggerHit,
@@ -1600,14 +1657,25 @@ function buildMorningConfirmation({
     };
   }
 
-  if (setupEligible && (triggerNear || liquiditySparse)) {
+  if ((setupEligible || manualEligible) && (triggerNear || liquiditySparse || hasPrice)) {
+    return {
+      decision: liquiditySparse || !qualityOk ? "SPARSE_PREMARKET" : "MANUAL_CONFIRM_REQUIRED",
+      confirmStatus: liquiditySparse ? "SPARSE_DATA" : "MANUAL_WATCH",
+      confirmScore,
+      triggerHit,
+      triggerNear,
+      notes: ["Kurulum korunuyor", "Tetik/likidite tamamlanmadı", "Confirmed deme"]
+    };
+  }
+
+  if (sparseEligible && (triggerNear || liquiditySparse || hasPrice)) {
     return {
       decision: "SPARSE_PREMARKET",
       confirmStatus: "SPARSE_DATA",
       confirmScore,
       triggerHit,
       triggerNear,
-      notes: ["Kurulum korunuyor", "Veri/hacim sınırlı", "Confirmed deme"]
+      notes: ["Sınırlı premarket teyidi", "Manuel kontrol önerilir"]
     };
   }
 
@@ -1954,7 +2022,27 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     explicitNarrativePivot: !!flags.narrativePivot
   });
 
-  const provisionalPlan = buildEntryPlan(baseDecision === "ALMA" && setupEligible ? "İZLE" : baseDecision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
+  const manualEligible = isManualConfirmCandidate({
+    structuralScore: structural.score,
+    ignitionScore: ignition.score,
+    formerRunnerScore: formerRunner.score,
+    familyScore: family.familyScore,
+    supernovaScore,
+    cleanRecoveryScore: cleanRecovery.score,
+    bestFamily: family.bestFamily,
+    explicitNarrativePivot: !!flags.narrativePivot
+  });
+
+  const sparseEligible = isSparsePremarketCandidate({
+    structuralScore: structural.score,
+    ignitionScore: ignition.score,
+    formerRunnerScore: formerRunner.score,
+    familyScore: family.familyScore,
+    supernovaScore,
+    cleanRecoveryScore: cleanRecovery.score
+  });
+
+  const provisionalPlan = buildEntryPlan(baseDecision === "ALMA" && (setupEligible || manualEligible) ? "İZLE" : baseDecision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
   const confirmProfile = buildConfirmProfile({
     entryIdea: provisionalPlan.entryIdea,
     bestFamily: family.bestFamily
@@ -1962,6 +2050,8 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
   const confirmation = buildMorningConfirmation({
     baseDecision,
     setupEligible,
+    manualEligible,
+    sparseEligible,
     pre: preMetrics,
     entryIdea: provisionalPlan.entryIdea,
     confirmProfile
@@ -2633,7 +2723,7 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova-v35", async (req, res) => {
+app.get("/api/live-supernova-v36", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
@@ -2643,7 +2733,7 @@ app.get("/api/live-supernova-v35", async (req, res) => {
   }
 });
 
-app.get("/api/backtest-supernova-v35", async (req, res) => {
+app.get("/api/backtest-supernova-v36", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -2667,5 +2757,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v3.5 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.6 running on port ${PORT}`);
 });
