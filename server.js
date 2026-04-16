@@ -14,8 +14,8 @@ app.use(express.json());
 app.use(express.static(__dirname));
 
 const DEFAULT_SYMBOLS = [
-  "RMSG", "ROLR", "RAYA", "CUE", "ELAB", "CYCN", "VCX", "LPA",
-  "CTMX", "SOPA", "RR", "TNON", "SIDU", "SQFT", "FUSE", "CREG", "BIRD"
+  "MYSE", "WSHP", "RMSG", "ROLR", "RAYA", "CUE", "ELAB", "CYCN",
+  "VCX", "LPA", "CTMX", "SOPA", "RR", "TNON", "SIDU", "SQFT"
 ];
 
 const ALLOWED_EXCHANGES = new Set(["NASDAQ", "NYSE", "AMEX", "ARCA", "BATS"]);
@@ -64,7 +64,8 @@ const SYMBOL_FLAGS = {
   },
   RAYA: {
     catalystFresh: true,
-    catalystType: "contract_award"
+    catalystType: "contract_award",
+    cleanRecoveryPreferred: true
   },
   CUE: {
     catalystFresh: true,
@@ -85,7 +86,8 @@ const SYMBOL_FLAGS = {
     catalystFresh: true,
     catalystType: "ai_transition",
     allowAbove8: true,
-    marketCapOverride: 14289000000
+    marketCapOverride: 14289000000,
+    cleanRecoveryPreferred: true
   },
   BIRD: {
     recentReverseSplit: false,
@@ -97,6 +99,58 @@ const SYMBOL_FLAGS = {
     marketCapOverride: 147951000,
     financingRisk: true,
     narrativePivot: true
+  },
+  MYSE: {
+    recentReverseSplit: false,
+    otcRisk: false,
+    recentDeficiency: false,
+    catalystFresh: true,
+    catalystType: "narrative_pivot",
+    allowAbove8: false,
+    marketCapOverride: 6227000,
+    financingRisk: false,
+    narrativePivot: true,
+    cleanRecoveryPreferred: true
+  },
+  WSHP: {
+    recentReverseSplit: false,
+    otcRisk: false,
+    recentDeficiency: false,
+    catalystFresh: true,
+    catalystType: "balance_sheet",
+    allowAbove8: true,
+    marketCapOverride: 89957000,
+    financingRisk: false,
+    narrativePivot: false,
+    cleanRecoveryPreferred: false,
+    manualReject: false,
+    cleanRecoveryPreferred: true
+  },
+  WNW: {
+    recentReverseSplit: true,
+    otcRisk: false,
+    recentDeficiency: false,
+    catalystFresh: false,
+    catalystType: "reverse_split",
+    allowAbove8: false,
+    marketCapOverride: 1916000,
+    financingRisk: true,
+    narrativePivot: false,
+    manualReject: true
+  },
+  CTNT: {
+    recentReverseSplit: false,
+    otcRisk: false,
+    recentDeficiency: false,
+    catalystFresh: false,
+    catalystType: "none",
+    allowAbove8: false,
+    marketCapOverride: 6293000,
+    financingRisk: false,
+    narrativePivot: false,
+    cleanRecoveryPreferred: false,
+    manualReject: false,
+    manualReject: true
   }
 };
 
@@ -152,17 +206,34 @@ const FAMILY_MODELS = [
   {
     name: "NARRATIVE_PIVOT",
     features: {
-      price: { weight: 7, ideal: [0.80, 12.00], hard: [0.20, 20.00] },
-      drawdown90: { weight: 7, ideal: [-95, -20], hard: [-99, 20] },
-      baseTightness10: { weight: 5, ideal: [8, 60], hard: [0, 120] },
-      prevDayRet: { weight: 14, ideal: [25, 250], hard: [-5, 600] },
-      prevVolRatio: { weight: 14, ideal: [5, 100], hard: [0.5, 400] },
-      prevDollarShock: { weight: 14, ideal: [5, 100], hard: [0.5, 400] },
-      prevCloseStrength: { weight: 8, ideal: [55, 100], hard: [20, 100] },
+      price: { weight: 6, ideal: [0.80, 10.00], hard: [0.20, 18.00] },
+      drawdown90: { weight: 5, ideal: [-92, -25], hard: [-99, 20] },
+      baseTightness10: { weight: 4, ideal: [8, 55], hard: [0, 120] },
+      prevDayRet: { weight: 12, ideal: [20, 180], hard: [-5, 450] },
+      prevVolRatio: { weight: 12, ideal: [4, 80], hard: [0.5, 300] },
+      prevDollarShock: { weight: 12, ideal: [4, 80], hard: [0.5, 300] },
+      prevCloseStrength: { weight: 7, ideal: [60, 100], hard: [20, 100] },
       breakout20: { weight: 4, ideal: [1, 1], hard: [0, 1] },
-      gapPct: { weight: 12, ideal: [20, 250], hard: [-10, 600] },
-      preVolRatio: { weight: 7, ideal: [1, 20], hard: [0.1, 80] },
-      holdQuality: { weight: 8, ideal: [50, 100], hard: [20, 100] }
+      gapPct: { weight: 10, ideal: [15, 180], hard: [-10, 450] },
+      preVolRatio: { weight: 6, ideal: [1, 16], hard: [0.1, 60] },
+      holdQuality: { weight: 7, ideal: [55, 100], hard: [20, 100] },
+      noReverseSplit: { weight: 15, ideal: [1, 1], hard: [0, 1] }
+    }
+  },
+  {
+    name: "CLEAN_RECOVERY",
+    features: {
+      price: { weight: 8, ideal: [0.20, 6.00], hard: [0.10, 10.00] },
+      drawdown90: { weight: 10, ideal: [-90, -35], hard: [-99, -5] },
+      drawdown252: { weight: 12, ideal: [-96, -45], hard: [-99, -10] },
+      baseTightness10: { weight: 12, ideal: [3, 28], hard: [0, 70] },
+      prevDayRet: { weight: 8, ideal: [5, 60], hard: [-20, 150] },
+      prevVolRatio: { weight: 8, ideal: [2, 18], hard: [0.5, 60] },
+      prevDollarShock: { weight: 8, ideal: [2, 18], hard: [0.5, 60] },
+      prevCloseStrength: { weight: 10, ideal: [72, 100], hard: [40, 100] },
+      breakout20: { weight: 6, ideal: [1, 1], hard: [0, 1] },
+      holdQuality: { weight: 4, ideal: [55, 100], hard: [30, 100] },
+      noReverseSplit: { weight: 14, ideal: [1, 1], hard: [0, 1] }
     }
   }
 ];
@@ -290,6 +361,8 @@ function getFlags(symbol) {
     floatOverride: null,
     financingRisk: false,
     narrativePivot: false,
+    cleanRecoveryPreferred: false,
+    manualReject: false,
     ...(SYMBOL_FLAGS[symbol] || {})
   };
 }
@@ -603,24 +676,38 @@ function buildStructuralMetrics(ctx, flags) {
   const high20ExLast = maxOf(ctx.hist20.slice(0, -1).map((b) => safeNum(b.h, 0)));
   const low30 = minOf(ctx.hist60.slice(-30).map((b) => safeNum(b.l, 0)));
   const high90 = maxOf(ctx.hist90.map((b) => safeNum(b.h, 0)));
+  const high252 = maxOf(ctx.hist252.map((b) => safeNum(b.h, 0)));
+  const low252 = minOf(ctx.hist252.map((b) => safeNum(b.l, 0)));
 
   const drawdown90 = high90 > 0 ? ((price / high90) - 1) * 100 : 0;
+  const drawdown252 = high252 > 0 ? ((price / high252) - 1) * 100 : 0;
   const reboundFrom30Low = low30 > 0 ? ((price - low30) / low30) * 100 : 0;
+  const historicalRecoveryFrom252Low = low252 > 0 ? ((price - low252) / low252) * 100 : 0;
   const baseTightness10 = price > 0 ? ((hist10High - hist10Low) / price) * 100 : 999;
   const breakout20 = high20ExLast > 0 && price > high20ExLast ? 1 : 0;
+  const historicalHighMultiple = price > 0 ? high252 / price : 0;
+  const likelyReverseSplitProxy =
+    historicalHighMultiple >= 80 ||
+    (historicalHighMultiple >= 45 && price >= 1.5 && safeNum(flags.marketCapOverride, 0) <= 30000000 && safeNum(flags.marketCapOverride, 0) > 0);
 
   return {
     price,
     drawdown90,
+    drawdown252,
     reboundFrom30Low,
+    historicalRecoveryFrom252Low,
     baseTightness10,
     breakout20,
+    historicalHighMultiple,
+    likelyReverseSplitProxy,
     recentReverseSplit: !!flags.recentReverseSplit,
     otcRisk: !!flags.otcRisk,
     recentDeficiency: !!flags.recentDeficiency,
     allowAbove8: !!flags.allowAbove8,
     marketCap: flags.marketCapOverride,
-    floatShares: flags.floatOverride
+    floatShares: flags.floatOverride,
+    cleanRecoveryPreferred: !!flags.cleanRecoveryPreferred,
+    manualReject: !!flags.manualReject
   };
 }
 
@@ -648,6 +735,8 @@ function buildIgnitionMetrics(ctx, flags) {
 
   const prevRangePct = computeRangePct(ctx.last.h, ctx.last.l, ctx.last.c);
   const rangeExpansion = prevRangePct != null ? prevRangePct / avgRange20 : 0;
+  const collapseTrap = prevDayRet <= -60;
+  const fadeRisk = prevDayRet >= 140 && safeNum(prevCloseStrength, 0) < 70;
 
   return {
     prevDayRet,
@@ -661,7 +750,9 @@ function buildIgnitionMetrics(ctx, flags) {
     catalystType: flags.catalystType || "none",
     catalystGrade: catalystGrade(flags.catalystType || "none"),
     financingRisk: !!flags.financingRisk,
-    narrativePivot: !!flags.narrativePivot
+    narrativePivot: !!flags.narrativePivot,
+    collapseTrap,
+    fadeRisk
   };
 }
 
@@ -853,6 +944,11 @@ function scoreStructural(m, flags) {
   let score = 0;
   const notes = [];
 
+  if (flags.manualReject || m.manualReject) {
+    notes.push("Manuel reject");
+    return { score: 0, notes, hardReject: true };
+  }
+
   if (flags.otcRisk) {
     notes.push("OTC riski");
     return { score: 0, notes, hardReject: true };
@@ -860,6 +956,16 @@ function scoreStructural(m, flags) {
 
   if (m.price < 0.10) {
     notes.push("0.10 altı fiyat");
+    return { score: 0, notes, hardReject: true };
+  }
+
+  if (flags.recentReverseSplit || m.recentReverseSplit) {
+    notes.push("Yakın reverse split");
+    return { score: 0, notes, hardReject: true };
+  }
+
+  if (m.likelyReverseSplitProxy) {
+    notes.push("Muhtemel reverse split proxy");
     return { score: 0, notes, hardReject: true };
   }
 
@@ -878,9 +984,12 @@ function scoreStructural(m, flags) {
   }
 
   if (m.marketCap != null && m.marketCap > 0) {
-    if (m.marketCap >= 10000000 && m.marketCap <= 120000000) score += 12;
+    if (m.marketCap >= 5000000 && m.marketCap <= 120000000) score += 12;
     else if (m.marketCap > 120000000 && m.marketCap <= 300000000) score += 6;
-    else if (m.marketCap > 600000000) {
+    else if (m.marketCap < 3000000) {
+      score -= 12;
+      notes.push("Aşırı küçük market cap");
+    } else if (m.marketCap > 600000000) {
       score -= 8;
       notes.push("Market cap büyük");
     }
@@ -891,6 +1000,11 @@ function scoreStructural(m, flags) {
   else if (m.drawdown90 < -95) {
     score -= 6;
     notes.push("Aşırı çökmüş");
+  }
+
+  if (m.drawdown252 <= -45 && m.drawdown252 >= -97) {
+    score += 10;
+    notes.push("Long-term collapse");
   }
 
   if (m.baseTightness10 >= 3 && m.baseTightness10 <= 28) score += 16;
@@ -911,14 +1025,14 @@ function scoreStructural(m, flags) {
     notes.push("20g high reclaim");
   }
 
-  if (flags.recentReverseSplit) {
-    score -= 24;
-    notes.push("Yakın reverse split");
-  }
-
   if (flags.recentDeficiency) {
     score -= 6;
     notes.push("Deficiency notice");
+  }
+
+  if (m.cleanRecoveryPreferred) {
+    score += 8;
+    notes.push("Clean recovery preferansı");
   }
 
   score = clamp(Math.round(score), 0, 100);
@@ -931,12 +1045,12 @@ function scoreIgnition(m) {
 
   if (m.prevDayRet >= 4 && m.prevDayRet < 15) score += 14;
   else if (m.prevDayRet >= 15 && m.prevDayRet < 45) score += 20;
-  else if (m.prevDayRet >= 45 && m.prevDayRet < 120) score += 16;
-  else if (m.prevDayRet >= 120 && m.prevDayRet < 250) {
-    score += 10;
+  else if (m.prevDayRet >= 45 && m.prevDayRet < 120) score += 14;
+  else if (m.prevDayRet >= 120 && m.prevDayRet < 220) {
+    score += 6;
     notes.push("Aşırı sıcak ilk gün");
-  } else if (m.prevDayRet >= 250) {
-    score += 4;
+  } else if (m.prevDayRet >= 220) {
+    score -= 4;
     notes.push("Mania spike");
   } else if (m.prevDayRet < 0) {
     score -= 12;
@@ -944,18 +1058,24 @@ function scoreIgnition(m) {
 
   if (m.prevVolRatio >= 1.5 && m.prevVolRatio < 3) score += 10;
   else if (m.prevVolRatio >= 3 && m.prevVolRatio < 10) score += 18;
-  else if (m.prevVolRatio >= 10) {
-    score += 22;
+  else if (m.prevVolRatio >= 10 && m.prevVolRatio < 40) {
+    score += 20;
     notes.push("Vol shock");
+  } else if (m.prevVolRatio >= 40) {
+    score += 8;
+    notes.push("Aşırı hacim / mania");
   } else if (m.prevVolRatio < 0.8) {
     score -= 8;
   }
 
   if (m.prevDollarShock >= 1.5 && m.prevDollarShock < 4) score += 10;
   else if (m.prevDollarShock >= 4 && m.prevDollarShock < 15) score += 18;
-  else if (m.prevDollarShock >= 15) {
-    score += 22;
+  else if (m.prevDollarShock >= 15 && m.prevDollarShock < 60) {
+    score += 20;
     notes.push("Dollar shock");
+  } else if (m.prevDollarShock >= 60) {
+    score += 8;
+    notes.push("Aşırı dollar shock");
   } else if (m.prevDollarShock < 0.8) {
     score -= 8;
   }
@@ -963,7 +1083,7 @@ function scoreIgnition(m) {
   if (m.prevCloseStrength >= 80) score += 16;
   else if (m.prevCloseStrength >= 65) score += 10;
   else if (m.prevCloseStrength < 45) {
-    score -= 10;
+    score -= 12;
     notes.push("Weak close");
   }
 
@@ -971,37 +1091,46 @@ function scoreIgnition(m) {
   else if (m.prevDollarVol >= 600000 && m.prevDollarVol < 3000000) score += 14;
   else if (m.prevDollarVol >= 3000000 && m.prevDollarVol < 30000000) score += 18;
   else if (m.prevDollarVol >= 30000000) {
-    score += 8;
+    score += 6;
     notes.push("Çok kalabalık tape");
   } else if (m.prevDollarVol < 50000) {
-    score -= 10;
+    score -= 12;
     notes.push("Dollar vol zayıf");
   }
 
   if (m.rangeExpansion >= 1.3 && m.rangeExpansion < 2.5) score += 8;
-  else if (m.rangeExpansion >= 2.5) score += 12;
+  else if (m.rangeExpansion >= 2.5 && m.rangeExpansion < 6) score += 10;
+  else if (m.rangeExpansion >= 6) {
+    score -= 6;
+    notes.push("Aşırı range expansion");
+  }
 
   if (m.catalystFresh && m.catalystGrade > 0) {
-    score += Math.min(m.catalystGrade, 24);
+    score += Math.min(m.catalystGrade, 18);
     notes.push(`Fresh catalyst: ${m.catalystType}`);
   } else if (m.catalystGrade < 0) {
     score += m.catalystGrade;
     notes.push(`Negative catalyst: ${m.catalystType}`);
   }
 
-  if (m.narrativePivot) {
-    score += 4;
+  if (m.narrativePivot && !m.financingRisk && m.prevCloseStrength >= 70) {
+    score += 2;
     notes.push("Narrative pivot");
   }
 
   if (m.financingRisk) {
-    score -= 8;
+    score -= 14;
     notes.push("Financing/dilution riski");
   }
 
-  if (m.prevDayRet >= 250 && m.financingRisk) {
-    score -= 6;
-    notes.push("Mania + financing riski");
+  if (m.collapseTrap) {
+    score -= 30;
+    notes.push("Collapse rebound trap");
+  }
+
+  if (m.fadeRisk) {
+    score -= 10;
+    notes.push("Fade riski");
   }
 
   score = clamp(Math.round(score), 0, 100);
@@ -1036,6 +1165,54 @@ function scoreFormerRunner(m) {
 
   score = clamp(Math.round(score), 0, 100);
   return { score, notes };
+}
+
+
+function computeCleanRecoveryScore(structuralMetrics, ignitionMetrics, flags, bestFamilyHint = null) {
+  let score = 0;
+  const notes = [];
+
+  if (!flags.recentReverseSplit && !safeNum(structuralMetrics.likelyReverseSplitProxy ? 1 : 0, 0)) score += 28;
+  else notes.push("Split riski");
+
+  if (flags.cleanRecoveryPreferred) {
+    score += 12;
+    notes.push("Clean recovery tercih");
+  }
+
+  if (structuralMetrics.drawdown252 <= -45 && structuralMetrics.drawdown252 >= -97) {
+    score += 18;
+    notes.push("Derin ama temiz çöküş");
+  } else if (structuralMetrics.drawdown252 > -25) {
+    score -= 8;
+  }
+
+  if (structuralMetrics.baseTightness10 >= 3 && structuralMetrics.baseTightness10 <= 28) score += 15;
+  else if (structuralMetrics.baseTightness10 > 45) score -= 10;
+
+  if (structuralMetrics.breakout20) score += 10;
+  if (ignitionMetrics.prevCloseStrength >= 72) score += 10;
+  if (ignitionMetrics.prevDayRet >= 5 && ignitionMetrics.prevDayRet <= 80) score += 8;
+  if (ignitionMetrics.prevVolRatio >= 2 && ignitionMetrics.prevVolRatio <= 20) score += 8;
+
+  if (ignitionMetrics.financingRisk) {
+    score -= 18;
+    notes.push("Financing riski");
+  }
+  if (ignitionMetrics.collapseTrap) {
+    score -= 28;
+    notes.push("Collapse rebound trap");
+  }
+  if (ignitionMetrics.fadeRisk) {
+    score -= 10;
+    notes.push("Fade riski");
+  }
+  if (bestFamilyHint === "NARRATIVE_PIVOT" && !flags.narrativePivot) {
+    score -= 18;
+    notes.push("Auto narrative pivot: continuation için temkin");
+  }
+
+  return { score: clamp(Math.round(score), 0, 100), notes };
 }
 
 function scoreRotation(m, source) {
@@ -1284,8 +1461,12 @@ function buildConfirmProfile({ entryIdea, bestFamily }) {
   }
 
   const tier = getConfirmTier(entry);
-  const familyVolumeBoost = bestFamily === "NARRATIVE_PIVOT" ? 1.15 : 1;
-  const strongMultiplier = bestFamily === "NARRATIVE_PIVOT" ? 1.025 : 1.02;
+  const familyVolumeBoost =
+    bestFamily === "NARRATIVE_PIVOT" ? 1.20 :
+    bestFamily === "CLEAN_RECOVERY" ? 0.95 : 1;
+  const strongMultiplier =
+    bestFamily === "NARRATIVE_PIVOT" ? 1.03 :
+    bestFamily === "CLEAN_RECOVERY" ? 1.015 : 1.02;
 
   return {
     triggerZoneLow: roundSmart(entry * CONFIRM_RULES.nearTolerance),
@@ -1304,13 +1485,24 @@ function buildConfirmProfile({ entryIdea, bestFamily }) {
   };
 }
 
-function isNightlyWatchEligible({ structuralScore, ignitionScore, formerRunnerScore, familyScore, supernovaScore }) {
+function isNightlyWatchEligible({
+  structuralScore,
+  ignitionScore,
+  formerRunnerScore,
+  familyScore,
+  supernovaScore,
+  cleanRecoveryScore,
+  bestFamily,
+  explicitNarrativePivot
+}) {
+  if (bestFamily === "NARRATIVE_PIVOT" && !explicitNarrativePivot) return false;
   return (
-    structuralScore >= 36 &&
-    ignitionScore >= 48 &&
-    formerRunnerScore >= 20 &&
-    familyScore >= 58 &&
-    supernovaScore >= 60
+    structuralScore >= 40 &&
+    ignitionScore >= 42 &&
+    formerRunnerScore >= 16 &&
+    familyScore >= 56 &&
+    supernovaScore >= 58 &&
+    cleanRecoveryScore >= 45
   );
 }
 
@@ -1443,13 +1635,24 @@ function computeSupernovaScoreLive(structuralScore, ignitionScore, formerRunnerS
   );
 }
 
-function finalNightlyDecision({ structuralScore, ignitionScore, formerRunnerScore, familyScore, supernovaScore }) {
+function finalNightlyDecision({
+  structuralScore,
+  ignitionScore,
+  formerRunnerScore,
+  familyScore,
+  supernovaScore,
+  cleanRecoveryScore,
+  bestFamily,
+  explicitNarrativePivot
+}) {
+  if (bestFamily === "NARRATIVE_PIVOT" && !explicitNarrativePivot) return "ALMA";
   if (
-    structuralScore >= 36 &&
-    ignitionScore >= 48 &&
-    formerRunnerScore >= 20 &&
-    familyScore >= 58 &&
-    supernovaScore >= 60
+    structuralScore >= 40 &&
+    ignitionScore >= 42 &&
+    formerRunnerScore >= 16 &&
+    familyScore >= 56 &&
+    supernovaScore >= 58 &&
+    cleanRecoveryScore >= 45
   ) {
     return "İZLE";
   }
@@ -1464,44 +1667,55 @@ function finalLiveDecision({
   premarketScore,
   familyScore,
   supernovaScore,
-  source
+  source,
+  cleanRecoveryScore,
+  bestFamily,
+  explicitNarrativePivot
 }) {
+  if (bestFamily === "NARRATIVE_PIVOT" && !explicitNarrativePivot) {
+    return source === "REAL_PREMARKET" ? "MANUAL_CONFIRM_REQUIRED" : "ALMA";
+  }
+
   if (source !== "REAL_PREMARKET") {
     if (
-      structuralScore >= 36 &&
-      ignitionScore >= 48 &&
-      formerRunnerScore >= 20 &&
-      familyScore >= 58 &&
-      supernovaScore >= 60
+      structuralScore >= 40 &&
+      ignitionScore >= 42 &&
+      formerRunnerScore >= 16 &&
+      familyScore >= 56 &&
+      supernovaScore >= 58 &&
+      cleanRecoveryScore >= 45
     ) return "İZLE";
     return "ALMA";
   }
 
   if (
     structuralScore >= 42 &&
-    ignitionScore >= 54 &&
-    formerRunnerScore >= 25 &&
+    ignitionScore >= 50 &&
+    formerRunnerScore >= 18 &&
     rotationScore >= 10 &&
     premarketScore >= 64 &&
-    familyScore >= 64 &&
-    supernovaScore >= 68
-  ) return "GÜÇLÜ AL";
+    familyScore >= 60 &&
+    supernovaScore >= 66 &&
+    cleanRecoveryScore >= 52
+  ) return "SUPERNOVA_CONFIRMED";
 
   if (
-    structuralScore >= 36 &&
-    ignitionScore >= 46 &&
-    formerRunnerScore >= 18 &&
+    structuralScore >= 40 &&
+    ignitionScore >= 44 &&
+    formerRunnerScore >= 16 &&
     premarketScore >= 52 &&
     familyScore >= 56 &&
-    supernovaScore >= 58
+    supernovaScore >= 58 &&
+    cleanRecoveryScore >= 45
   ) return "AL";
 
   if (
-    structuralScore >= 36 &&
-    ignitionScore >= 48 &&
-    formerRunnerScore >= 20 &&
-    familyScore >= 58 &&
-    supernovaScore >= 60
+    structuralScore >= 40 &&
+    ignitionScore >= 42 &&
+    formerRunnerScore >= 16 &&
+    familyScore >= 56 &&
+    supernovaScore >= 58 &&
+    cleanRecoveryScore >= 45
   ) return "İZLE";
 
   return "ALMA";
@@ -1537,8 +1751,11 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     prevVolRatio: ignitionMetrics.prevVolRatio,
     prevDollarShock: ignitionMetrics.prevDollarShock,
     prevCloseStrength: ignitionMetrics.prevCloseStrength,
-    breakout20: !!structuralMetrics.breakout20
+    breakout20: !!structuralMetrics.breakout20,
+    drawdown252: structuralMetrics.drawdown252,
+    noReverseSplit: !(flags.recentReverseSplit || structuralMetrics.likelyReverseSplitProxy)
   });
+  const cleanRecovery = computeCleanRecoveryScore(structuralMetrics, ignitionMetrics, flags, family.bestFamily);
 
   const supernovaScore = computeSupernovaScoreNightly(
     structural.score,
@@ -1574,6 +1791,7 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
     formerRunnerScore: formerRunner.score,
     rotationScore: rotation.score,
     premarketScore: 0,
+    cleanRecoveryScore: cleanRecovery.score,
     familyScore: family.familyScore,
     bestFamily: family.bestFamily,
     familyMatches: family.topFamilies.map((x) => `${x.name}:${x.score}`).join(" | "),
@@ -1635,6 +1853,7 @@ function buildNightlyRocketRow({ symbol, dailyBars, referenceTradeDate }) {
       ...structural.notes,
       ...ignition.notes,
       ...formerRunner.notes,
+      ...cleanRecovery.notes,
       ...rotation.notes
     ].join(" | ")
   };
@@ -1685,8 +1904,11 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     gapPct: preMetrics.gapPct,
     preVolRatio: preMetrics.preVolRatio,
     holdQuality: preMetrics.holdQuality,
-    abovePrevHigh: !!preMetrics.abovePrevHigh
+    abovePrevHigh: !!preMetrics.abovePrevHigh,
+    drawdown252: structuralMetrics.drawdown252,
+    noReverseSplit: !(flags.recentReverseSplit || structuralMetrics.likelyReverseSplitProxy)
   });
+  const cleanRecovery = computeCleanRecoveryScore(structuralMetrics, ignitionMetrics, flags, family.bestFamily);
 
   const supernovaScore = computeSupernovaScoreLive(
     structural.score,
@@ -1707,7 +1929,10 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
       premarketScore: premarket.score,
       familyScore: family.familyScore,
       supernovaScore,
-      source: pre.source
+      source: pre.source,
+      cleanRecoveryScore: cleanRecovery.score,
+      bestFamily: family.bestFamily,
+      explicitNarrativePivot: !!flags.narrativePivot
     });
   }
 
@@ -1716,7 +1941,10 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     ignitionScore: ignition.score,
     formerRunnerScore: formerRunner.score,
     familyScore: family.familyScore,
-    supernovaScore
+    supernovaScore,
+    cleanRecoveryScore: cleanRecovery.score,
+    bestFamily: family.bestFamily,
+    explicitNarrativePivot: !!flags.narrativePivot
   });
 
   const provisionalPlan = buildEntryPlan(baseDecision === "ALMA" && setupEligible ? "İZLE" : baseDecision, pre.source, pre.price, pre.preVWAP, safeNum(ctx.last.h, 0));
@@ -1749,6 +1977,7 @@ function buildFullRocketRow({ symbol, dailyBars, minuteBars, tradeDate, cutoffTi
     formerRunnerScore: formerRunner.score,
     rotationScore: rotation.score,
     premarketScore: premarket.score,
+    cleanRecoveryScore: cleanRecovery.score,
     familyScore: family.familyScore,
     bestFamily: family.bestFamily,
     familyMatches: family.topFamilies.map((x) => `${x.name}:${x.score}`).join(" | "),
@@ -1856,6 +2085,21 @@ function buildBacktestOutcome(tradeDayMinuteBars, tradeDate, entryIdea) {
     realizedEntryToHighPct: roundSmart(realizedEntryToHighPct),
     realizedOpenToHighPct: roundSmart(realizedOpenToHighPct)
   };
+}
+
+
+function computeRowSortKey(row) {
+  const cleanRecovery = safeNum(row.cleanRecoveryScore, 0);
+  const familyPenalty =
+    row.bestFamily === "NARRATIVE_PIVOT" && !row.explicitNarrativePivot ? 14 : 0;
+  const confirmBoost =
+    row.decision === "SUPERNOVA_CONFIRMED" ? 24 :
+    row.decision === "AL" ? 12 : 0;
+  return (
+    decisionRank(row.decision) * 100000 +
+    (safeNum(row.supernovaScore, 0) + 0.35 * cleanRecovery + confirmBoost - familyPenalty) * 100 +
+    safeNum(row.familyScore, 0)
+  );
 }
 
 function summarizeRows(rows) {
@@ -2016,21 +2260,15 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   }
 
   nightlyRows.sort((a, b) => {
-    const aKey =
-      decisionRank(a.decision) * 100000 +
-      safeNum(a.supernovaScore, 0) * 100 +
-      safeNum(a.familyScore, 0);
-    const bKey =
-      decisionRank(b.decision) * 100000 +
-      safeNum(b.supernovaScore, 0) * 100 +
-      safeNum(b.familyScore, 0);
-    return bKey - aKey;
+    const aKey = computeRowSortKey(a);
+      const bKey = computeRowSortKey(b);
+      return bKey - aKey;
   });
 
   if (session === "afterhours" || session === "closed") {
     const topNightly = nightlyRows.slice(0, 40);
     return {
-      mode: "AUTO_ROCKET_NIGHTLY_V34",
+      mode: "AUTO_ROCKET_NIGHTLY_V35",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -2116,19 +2354,13 @@ async function buildLiveAutoUniverse(session, today, cutoffTime) {
   }
 
   fullRows.sort((a, b) => {
-    const aKey =
-      decisionRank(a.decision) * 100000 +
-      safeNum(a.supernovaScore, 0) * 100 +
-      safeNum(a.familyScore, 0);
-    const bKey =
-      decisionRank(b.decision) * 100000 +
-      safeNum(b.supernovaScore, 0) * 100 +
-      safeNum(b.familyScore, 0);
-    return bKey - aKey;
+    const aKey = computeRowSortKey(a);
+      const bKey = computeRowSortKey(b);
+      return bKey - aKey;
   });
 
   return {
-    mode: "AUTO_ROCKET_PREMARKET_V34",
+    mode: "AUTO_ROCKET_PREMARKET_V35",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2166,19 +2398,13 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
     }
 
     rows.sort((a, b) => {
-      const aKey =
-        decisionRank(a.decision) * 100000 +
-        safeNum(a.supernovaScore, 0) * 100 +
-        safeNum(a.familyScore, 0);
-      const bKey =
-        decisionRank(b.decision) * 100000 +
-        safeNum(b.supernovaScore, 0) * 100 +
-        safeNum(b.familyScore, 0);
+      const aKey = computeRowSortKey(a);
+      const bKey = computeRowSortKey(b);
       return bKey - aKey;
     });
 
     return {
-      mode: "MANUAL_ROCKET_NIGHTLY_V34",
+      mode: "MANUAL_ROCKET_NIGHTLY_V35",
       session,
       feed: ALPACA_FEED,
       cutoffTime: null,
@@ -2246,19 +2472,13 @@ async function buildLiveManual(symbols, session, today, cutoffTime) {
   }
 
   rows.sort((a, b) => {
-    const aKey =
-      decisionRank(a.decision) * 100000 +
-      safeNum(a.supernovaScore, 0) * 100 +
-      safeNum(a.familyScore, 0);
-    const bKey =
-      decisionRank(b.decision) * 100000 +
-      safeNum(b.supernovaScore, 0) * 100 +
-      safeNum(b.familyScore, 0);
-    return bKey - aKey;
+    const aKey = computeRowSortKey(a);
+      const bKey = computeRowSortKey(b);
+      return bKey - aKey;
   });
 
   return {
-    mode: "MANUAL_ROCKET_PREMARKET_V34",
+    mode: "MANUAL_ROCKET_PREMARKET_V35",
     session,
     feed: ALPACA_FEED,
     cutoffTime,
@@ -2379,19 +2599,13 @@ async function buildBacktest(dateStr, symbolsRaw) {
   }
 
   rows.sort((a, b) => {
-    const aKey =
-      decisionRank(a.decision) * 100000 +
-      safeNum(a.supernovaScore, 0) * 100 +
-      safeNum(a.familyScore, 0);
-    const bKey =
-      decisionRank(b.decision) * 100000 +
-      safeNum(b.supernovaScore, 0) * 100 +
-      safeNum(b.familyScore, 0);
-    return bKey - aKey;
+    const aKey = computeRowSortKey(a);
+      const bKey = computeRowSortKey(b);
+      return bKey - aKey;
   });
 
   return {
-    mode: "ROCKET_BACKTEST_V34",
+    mode: "ROCKET_BACKTEST_V35",
     tradeDate: dateStr,
     feed: ALPACA_FEED,
     cutoffTime: "09:25:00",
@@ -2412,17 +2626,17 @@ app.get("/api/default-symbols", (req, res) => {
   res.json({ symbols: DEFAULT_SYMBOLS });
 });
 
-app.get("/api/live-supernova-v34", async (req, res) => {
+app.get("/api/live-supernova-v35", async (req, res) => {
   try {
     const data = await buildLive(req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("LIVE_SUPERNOVA_V34 error:", err);
+    console.error("LIVE_SUPERNOVA_V35 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
 
-app.get("/api/backtest-supernova-v34", async (req, res) => {
+app.get("/api/backtest-supernova-v35", async (req, res) => {
   try {
     const dateStr = String(req.query.date || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
@@ -2432,7 +2646,7 @@ app.get("/api/backtest-supernova-v34", async (req, res) => {
     const data = await buildBacktest(dateStr, req.query.symbols || "");
     res.json(data);
   } catch (err) {
-    console.error("BACKTEST_SUPERNOVA_V34 error:", err);
+    console.error("BACKTEST_SUPERNOVA_V35 error:", err);
     res.status(500).json({ error: "server error", detail: err.message });
   }
 });
@@ -2446,5 +2660,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Rocket Engine v3.4 running on port ${PORT}`);
+  console.log(`Rocket Engine v3.5 running on port ${PORT}`);
 });
